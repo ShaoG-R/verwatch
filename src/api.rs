@@ -98,8 +98,8 @@ impl<'a, C: HttpClient> GitHubGateway<'a, C> {
     ) -> Result<()> {
         let payload = json!({ "version": version });
         let event = DispatchEvent {
-            owner: &config.my_owner,
-            repo: &config.my_repo,
+            owner: &config.base.my_owner,
+            repo: &config.base.my_repo,
             token,
             event_type: "upstream_update",
             client_payload: payload,

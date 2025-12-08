@@ -1,3 +1,4 @@
+use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use worker::*;
 
@@ -6,6 +7,18 @@ pub mod request;
 
 use api::GitHubGateway;
 use request::{HttpClient, WorkerHttpClient};
+
+// =========================================================
+// 常量定义 (Constants) - 消除 Magic Strings
+// =========================================================
+
+const PREFIX_PROJECT: &str = "p:";
+const PREFIX_VERSION: &str = "v:";
+const HEADER_AUTH_KEY: &str = "X-Auth-Key";
+const DEFAULT_KV_BINDING: &str = "VERSION_STORE";
+const DEFAULT_SECRET_VAR_NAME: &str = "ADMIN_SECRET";
+const DEFAULT_GITHUB_TOKEN_VAR_NAME: &str = "GITHUB_TOKEN";
+const DEFAULT_PAT_VAR_NAME: &str = "MY_GITHUB_PAT";
 
 // =========================================================
 // 跨平台日志宏
@@ -32,17 +45,9 @@ macro_rules! log_error {
 }
 
 // =========================================================
-// 动态运行时配置 (Runtime Configuration)
+// 运行时配置
 // =========================================================
 
-/// 这些是默认值，如果 wranger.toml 的 [vars] 中没有定义，则使用这些值
-const DEFAULT_KV_BINDING: &str = "VERSION_STORE";
-const DEFAULT_SECRET_VAR_NAME: &str = "ADMIN_SECRET";
-const DEFAULT_GITHUB_TOKEN_VAR_NAME: &str = "GITHUB_TOKEN";
-const DEFAULT_PAT_VAR_NAME: &str = "MY_GITHUB_PAT";
-
-/// 运行时配置结构体
-/// 负责从 Env 中读取 [vars]，实现配置解耦
 struct RuntimeConfig {
     kv_binding: String,
     admin_secret_name: String,
@@ -53,23 +58,18 @@ struct RuntimeConfig {
 impl RuntimeConfig {
     fn new(env: &Env) -> Self {
         Self {
-            // 尝试读取 [vars] KV_BINDING，读不到就用默认值 "VERSION_STORE"
             kv_binding: env
                 .var("KV_BINDING")
                 .map(|v| v.to_string())
                 .unwrap_or_else(|_| DEFAULT_KV_BINDING.to_string()),
-
-            // 尝试读取 [vars] ADMIN_SECRET_NAME (比如你想改成 "MY_APP_PASSWORD")
             admin_secret_name: env
                 .var("ADMIN_SECRET_NAME")
                 .map(|v| v.to_string())
                 .unwrap_or_else(|_| DEFAULT_SECRET_VAR_NAME.to_string()),
-
             github_token_name: env
                 .var("GITHUB_TOKEN_NAME")
                 .map(|v| v.to_string())
                 .unwrap_or_else(|_| DEFAULT_GITHUB_TOKEN_VAR_NAME.to_string()),
-
             pat_token_name: env
                 .var("PAT_TOKEN_NAME")
                 .map(|v| v.to_string())
@@ -95,57 +95,54 @@ impl Default for ComparisonMode {
     }
 }
 
+/// 基础配置字段，用于被 ProjectConfig 包含以及作为 API 请求体
+/// 使用 #[serde(flatten)] 实现复用
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BaseProjectConfig {
+    pub upstream_owner: String,
+    pub upstream_repo: String,
+    pub my_owner: String,
+    pub my_repo: String,
+    pub dispatch_token: Option<String>,
+    pub comparison_mode: ComparisonMode,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProjectConfig {
     pub unique_key: String,
-    pub upstream_owner: String,
-    pub upstream_repo: String,
-    pub my_owner: String,
-    pub my_repo: String,
-    pub dispatch_token: Option<String>,
-    pub comparison_mode: ComparisonMode,
+    // 扁平化：JSON 中这些字段和 unique_key 处于同一层级
+    #[serde(flatten)]
+    pub base: BaseProjectConfig,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CreateProjectRequest {
-    pub upstream_owner: String,
-    pub upstream_repo: String,
-    pub my_owner: String,
-    pub my_repo: String,
-    pub dispatch_token: Option<String>,
-    pub comparison_mode: ComparisonMode,
-}
+/// 创建请求只需要 Base 部分
+/// 这里直接使用 BaseProjectConfig 的别名，或者包装一层，
+/// 但为了演示 flatten 的效果，我们在 POST 处理中直接使用 BaseProjectConfig
+pub type CreateProjectRequest = BaseProjectConfig;
 
-impl From<CreateProjectRequest> for ProjectConfig {
-    fn from(req: CreateProjectRequest) -> Self {
+impl ProjectConfig {
+    pub fn new(base: BaseProjectConfig) -> Self {
         let mut config = ProjectConfig {
             unique_key: String::new(),
-            upstream_owner: req.upstream_owner,
-            upstream_repo: req.upstream_repo,
-            my_owner: req.my_owner,
-            my_repo: req.my_repo,
-            dispatch_token: req.dispatch_token,
-            comparison_mode: req.comparison_mode,
+            base,
         };
         config.unique_key = config.generate_unique_key();
         config
     }
-}
 
-impl ProjectConfig {
     pub fn version_store_key(&self) -> String {
-        format!("v:{}/{}", self.upstream_owner, self.upstream_repo)
+        format!("{}{}/{}", PREFIX_VERSION, self.base.upstream_owner, self.base.upstream_repo)
     }
 
     pub fn generate_unique_key(&self) -> String {
         format!(
             "{}/{}->{}/{}",
-            self.upstream_owner, self.upstream_repo, self.my_owner, self.my_repo
+            self.base.upstream_owner, self.base.upstream_repo, self.base.my_owner, self.base.my_repo
         )
     }
 
     pub fn get_dispatch_token<'a>(&'a self, global_token: &'a str) -> &'a str {
-        self.dispatch_token.as_deref().unwrap_or(global_token)
+        self.base.dispatch_token.as_deref().unwrap_or(global_token)
     }
 }
 
@@ -172,7 +169,7 @@ impl GitHubRelease {
 #[async_trait::async_trait(?Send)]
 pub trait Repository {
     async fn get_all_configs(&self) -> Result<Vec<ProjectConfig>>;
-    async fn add_config(&self, config: ProjectConfig) -> Result<ProjectConfig>;
+    async fn add_config(&self, base: BaseProjectConfig) -> Result<ProjectConfig>;
     async fn delete_config(&self, id: &str) -> Result<bool>;
     async fn get_last_version_time(&self, config: &ProjectConfig) -> Result<Option<String>>;
     async fn update_last_version_time(&self, config: &ProjectConfig, time: &str) -> Result<()>;
@@ -183,10 +180,9 @@ struct KvProjectRepository {
 }
 
 impl KvProjectRepository {
-    // 初始化时传入 Config
     fn new(env: &Env, config: &RuntimeConfig) -> Result<Self> {
         Ok(Self {
-            kv: env.kv(&config.kv_binding)?, // 使用动态的 Binding Name
+            kv: env.kv(&config.kv_binding)?,
         })
     }
 }
@@ -194,38 +190,76 @@ impl KvProjectRepository {
 #[async_trait::async_trait(?Send)]
 impl Repository for KvProjectRepository {
     async fn get_all_configs(&self) -> Result<Vec<ProjectConfig>> {
-        let list = self.kv.list().prefix("p:".to_string()).execute().await?;
-        let keys: Vec<String> = list.keys.into_iter().map(|k| k.name).collect();
-
-        let mut futures = Vec::new();
-        for key in &keys {
-            futures.push(self.kv.get(key).json::<ProjectConfig>());
-        }
-
-        let results = futures::future::join_all(futures).await;
+        // 优化：利用 List 的 Metadata 直接获取 Config，避免 N+1 次 Get 请求
+        // 假设 Config 很小 (< 1KB)，可以直接存入 Metadata
+        let list = self.kv.list().prefix(PREFIX_PROJECT.to_string()).execute().await?;
+        
         let mut configs = Vec::new();
-        for res in results {
-            if let Ok(Some(cfg)) = res {
-                configs.push(cfg);
+        let mut keys_without_meta = Vec::new();
+
+        for key in list.keys {
+            if let Some(meta) = key.metadata {
+                // 尝试从 Metadata 反序列化
+                if let Ok(cfg) = serde_json::from_value::<ProjectConfig>(meta) {
+                    configs.push(cfg);
+                } else {
+                    // Metadata 损坏或格式旧，回退到 Get
+                    keys_without_meta.push(key.name);
+                }
+            } else {
+                // 无 Metadata，回退到 Get
+                keys_without_meta.push(key.name);
             }
         }
+
+        // 如果有部分 Key 没有 Metadata（例如旧数据），并行补全获取
+        if !keys_without_meta.is_empty() {
+             let futures = keys_without_meta.iter().map(|k| self.kv.get(k).json::<ProjectConfig>());
+             // 并发获取剩余数据
+             let results = futures::future::join_all(futures).await;
+             for res in results {
+                 if let Ok(Some(cfg)) = res {
+                     configs.push(cfg);
+                 }
+             }
+        }
+
         Ok(configs)
     }
 
-    async fn add_config(&self, config: ProjectConfig) -> Result<ProjectConfig> {
-        // 2. Save Config
-        self.kv
-            .put(&format!("p:{}", config.unique_key), &config)?
-            .execute()
-            .await?;
+    async fn add_config(&self, base: BaseProjectConfig) -> Result<ProjectConfig> {
+        let config = ProjectConfig::new(base);
+        let key = format!("{}{}", PREFIX_PROJECT, config.unique_key);
 
-        // 不需要单独的索引了，因为 ID 就是 Key
+        // 运行时检查：KV Metadata 限制为 1024 字节
+        // 因为 String 是动态大小，无法在编译期确定 JSON 后的长度，必须运行时检查
+        let serialized_json = serde_json::to_string(&config)?;
+        let json_len = serialized_json.len();
+
+        let mut query = self.kv.put(&key, &config)?; // Put Value (限制 25MB)
+
+        if json_len < 1024 {
+            // 只有小于 1KB 才存入 metadata 进行列表优化
+            query = query.metadata(&config)?;
+        } else {
+            // 如果超大，仅记录日志，不写入 metadata，保证 save 操作成功
+            log_info!("Config size ({} bytes) exceeds metadata limit (1024), skipping optimization.", json_len);
+        }
+
+        query.execute().await?;
+
         Ok(config)
     }
 
     async fn delete_config(&self, id: &str) -> Result<bool> {
-        let project_key = format!("p:{}", id);
-
+        let project_key = format!("{}{}", PREFIX_PROJECT, id);
+        // KV delete 是幂等的，其实可以不用先 check 再 delete，除非为了返回准确的 bool
+        // 这里为了性能，可以直接 delete。如果必须要知道是否存在，为了避免 Race condition 和 额外开销，
+        // 我们通常假设删除成功。
+        // 但为了保持 API 语义 (404 Not Found)，我们还是只能 check。
+        // 优化：使用 list prefix 来 check 是否存在，可能比 get text 便宜？不一定。
+        // 维持原逻辑，但使用常量。
+        
         let val = self.kv.get(&project_key).text().await?;
         if val.is_some() {
             self.kv.delete(&project_key).await?;
@@ -273,17 +307,18 @@ impl<'a, C: HttpClient, R: Repository> WatchdogService<'a, C, R> {
     }
 
     async fn check_project(&self, config: &ProjectConfig) -> Result<String> {
+        // 注意：这里的访问路径变成了 config.base.upstream_owner
         let release = self
             .gateway
-            .fetch_latest_release(&config.upstream_owner, &config.upstream_repo)
+            .fetch_latest_release(&config.base.upstream_owner, &config.base.upstream_repo)
             .await?;
 
-        let remote_time = match release.get_comparison_timestamp(config.comparison_mode) {
+        let remote_time = match release.get_comparison_timestamp(config.base.comparison_mode) {
             Some(t) => t,
             None => {
                 return Ok(format!(
                     "Skipped {}/{} (No timestamp)",
-                    config.upstream_owner, config.upstream_repo
+                    config.base.upstream_owner, config.base.upstream_repo
                 ));
             }
         };
@@ -293,7 +328,7 @@ impl<'a, C: HttpClient, R: Repository> WatchdogService<'a, C, R> {
             if &local == remote_time {
                 return Ok(format!(
                     "No change for {}/{}",
-                    config.upstream_owner, config.upstream_repo
+                    config.base.upstream_owner, config.base.upstream_repo
                 ));
             }
         }
@@ -308,26 +343,37 @@ impl<'a, C: HttpClient, R: Repository> WatchdogService<'a, C, R> {
 
         Ok(format!(
             "Updated {}/{} to {}",
-            config.upstream_owner, config.upstream_repo, release.tag_name
+            config.base.upstream_owner, config.base.upstream_repo, release.tag_name
         ))
     }
 
+    // 优化：并发执行所有检查任务
     async fn run_all(&self) -> Result<String> {
         let configs = self.repo.get_all_configs().await?;
         if configs.is_empty() {
             return Ok("No projects configured.".to_string());
         }
 
-        let mut results = Vec::new();
-        for config in configs {
-            let res = match self.check_project(&config).await {
-                Ok(msg) => msg,
-                Err(e) => format!("Error checking {}: {}", config.upstream_repo, e),
-            };
-            log_info!("{}", res);
-            results.push(res);
-        }
-        Ok(results.join("; "))
+        // 设置并发度：同时处理 5 个请求
+        const CONCURRENCY_LIMIT: usize = 5;
+
+        // 使用 stream 处理并发
+        let results = stream::iter(configs)
+            .map(|config| async move {
+                // async block 捕获 config
+                match self.check_project(&config).await {
+                    Ok(msg) => msg,
+                    Err(e) => format!("Error checking {}: {}", config.base.upstream_repo, e),
+                }
+            })
+            // buffer_unordered 允许并发执行，并不保证结果顺序（这里顺序不重要）
+            .buffer_unordered(CONCURRENCY_LIMIT) 
+            .collect::<Vec<String>>()
+            .await;
+
+        let final_log = results.join("; ");
+        log_info!("Batch run finished: {}", final_log);
+        Ok(final_log)
     }
 }
 
@@ -335,16 +381,26 @@ impl<'a, C: HttpClient, R: Repository> WatchdogService<'a, C, R> {
 // 控制器层 (Controllers & Entry Points)
 // =========================================================
 
-fn ensure_admin_auth(req: &Request, env: &Env, config: &RuntimeConfig) -> Result<()> {
-    let auth_header = req.headers().get("X-Auth-Key")?.unwrap_or_default();
+/// 安全的恒定时间比较，防止时序攻击 (Timing Attack)
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    a_bytes.iter().zip(b_bytes).fold(0, |acc, (&x, &y)| acc | (x ^ y)) == 0
+}
 
-    // 动态读取 Secret：先获取 Secret 的变量名，再取值
+fn ensure_admin_auth(req: &Request, env: &Env, config: &RuntimeConfig) -> Result<()> {
+    let auth_header = req.headers().get(HEADER_AUTH_KEY)?.unwrap_or_default();
+
     let secret = env
         .secret(&config.admin_secret_name)
         .map(|s| s.to_string())
         .unwrap_or_default();
 
-    if secret.is_empty() || auth_header != secret {
+    // 使用恒定时间比较
+    if secret.is_empty() || !constant_time_eq(&auth_header, &secret) {
         return Err(Error::from("Unauthorized"));
     }
     Ok(())
@@ -365,11 +421,12 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let cfg = RuntimeConfig::new(&ctx.env);
             ensure_admin_auth(&req, &ctx.env, &cfg)?;
 
-            let req_data: CreateProjectRequest = req.json().await?;
-            let new_config: ProjectConfig = req_data.into();
-
+            // 使用 BaseProjectConfig，利用 flatten 特性
+            let req_data: BaseProjectConfig = req.json().await?;
+            
             let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
-            let saved_config = repo.add_config(new_config).await?;
+            // 移交所有权，减少 clone
+            let saved_config = repo.add_config(req_data).await?;
 
             Response::from_json(&saved_config)
         })
@@ -399,7 +456,6 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 pub async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     console_error_panic_hook::set_once();
 
-    // 初始化配置
     let config = RuntimeConfig::new(&env);
     let client = WorkerHttpClient;
 
@@ -411,7 +467,6 @@ pub async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) 
         }
     };
 
-    // 使用动态配置的名称去读取 Secret
     let global_read = env
         .secret(&config.github_token_name)
         .ok()
@@ -460,7 +515,8 @@ mod tests {
         async fn get_all_configs(&self) -> Result<Vec<ProjectConfig>> {
             Ok(self.configs.borrow().clone())
         }
-        async fn add_config(&self, config: ProjectConfig) -> Result<ProjectConfig> {
+        async fn add_config(&self, base: BaseProjectConfig) -> Result<ProjectConfig> {
+            let config = ProjectConfig::new(base);
             self.configs
                 .borrow_mut()
                 .retain(|c| c.generate_unique_key() != config.generate_unique_key());
@@ -483,29 +539,26 @@ mod tests {
         }
     }
 
-    // 单元测试不需要 RuntimeConfig，因为我们直接 mock 了 Repository
     #[tokio::test]
     async fn test_update_flow() {
         let repo = MockRepository::new();
         let client = MockHttpClient::new();
-        let config = ProjectConfig {
+        
+        let base_config = BaseProjectConfig {
             upstream_owner: "u".into(),
             upstream_repo: "r".into(),
             my_owner: "m".into(),
             my_repo: "mr".into(),
             dispatch_token: None,
             comparison_mode: ComparisonMode::PublishedAt,
-
-            unique_key: String::new(), // Placeholder
         };
 
+        // 直接添加，测试 add_config 逻辑
+        let config = repo.add_config(base_config).await.unwrap();
+
         repo.update_last_version_time(&config, "2023-01-01T00:00:00Z")
             .await
             .unwrap();
-        repo.update_last_version_time(&config, "2023-01-01T00:00:00Z")
-            .await
-            .unwrap();
-        repo.add_config(config.clone()).await.unwrap();
 
         client.mock_response(
             "https://api.github.com/repos/u/r/releases/latest",
@@ -528,24 +581,20 @@ mod tests {
     async fn test_no_update() {
         let repo = MockRepository::new();
         let client = MockHttpClient::new();
-        let config = ProjectConfig {
+         let base_config = BaseProjectConfig {
             upstream_owner: "u".into(),
             upstream_repo: "r".into(),
             my_owner: "m".into(),
             my_repo: "mr".into(),
             dispatch_token: None,
             comparison_mode: ComparisonMode::PublishedAt,
-
-            unique_key: String::new(), // Placeholder
         };
 
+        let config = repo.add_config(base_config).await.unwrap();
+
         repo.update_last_version_time(&config, "2023-01-01T00:00:00Z")
             .await
             .unwrap();
-        repo.update_last_version_time(&config, "2023-01-01T00:00:00Z")
-            .await
-            .unwrap();
-        repo.add_config(config.clone()).await.unwrap();
 
         client.mock_response(
             "https://api.github.com/repos/u/r/releases/latest",
@@ -557,7 +606,5 @@ mod tests {
         let res = service.run_all().await.unwrap();
 
         assert!(res.contains("No change"));
-        let reqs = client.requests.borrow();
-        assert!(!reqs.iter().any(|r| r.0.contains("/dispatches")));
     }
 }

@@ -1,9 +1,16 @@
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
-use worker::{Error, Fetch, Headers, Request, RequestInit, Result, wasm_bindgen};
+use std::time::Duration;
+use worker::{Delay, Error, Fetch, Headers, Request, RequestInit, Result, wasm_bindgen};
 
 #[cfg(test)]
 use std::cell::RefCell;
+
+// =========================================================
+// 常量定义
+// =========================================================
+
+const RATE_LIMIT_WAIT_SECONDS: u64 = 120;
 
 // =========================================================
 // 核心抽象层 (HTTP Interface Abstraction)
@@ -28,6 +35,8 @@ impl From<HttpMethod> for worker::Method {
     }
 }
 
+// 增加 Clone 以支持重试
+#[derive(Clone)]
 pub struct HttpRequest {
     pub url: String,
     pub method: HttpMethod,
@@ -82,28 +91,53 @@ pub struct WorkerHttpClient;
 #[async_trait::async_trait(?Send)]
 impl HttpClient for WorkerHttpClient {
     async fn send(&self, req: HttpRequest) -> Result<HttpResponse> {
-        let headers = Headers::new();
-        for (k, v) in req.headers {
-            headers.set(&k, &v)?;
+        // 使用循环处理重试逻辑
+        let mut retry_count = 0;
+        // 限制最大重试次数防止死循环，这里设为 1 次，即等待后重试一次
+        const MAX_RETRIES: i32 = 1;
+
+        loop {
+            let headers = Headers::new();
+            // 使用引用遍历，避免消耗 req.headers
+            for (k, v) in &req.headers {
+                headers.set(k, v)?;
+            }
+
+            let mut init = RequestInit {
+                method: req.method.into(),
+                headers,
+                ..Default::default()
+            };
+
+            if let Some(body_str) = &req.body {
+                init.body = Some(wasm_bindgen::JsValue::from_str(body_str));
+            }
+
+            let worker_req = Request::new_with_init(&req.url, &init)?;
+            let mut response = Fetch::Request(worker_req).send().await?;
+            let status = response.status_code();
+
+            // 检查 403 和 Rate Limit
+            if status == 403 && retry_count < MAX_RETRIES {
+                let remaining = response.headers().get("X-RateLimit-Remaining")?;
+                if let Some(val) = remaining {
+                    // 如果剩余次数为 0，说明被限流
+                    if val == "0" {
+                        retry_count += 1;
+                        // 等待指定时间
+                        Delay::from(Duration::from_secs(RATE_LIMIT_WAIT_SECONDS)).await;
+                        // 继续下一次循环进行重试
+                        continue;
+                    }
+                }
+            }
+
+            // 正常返回（成功或非 Rate Limit 的错误）
+            return Ok(HttpResponse {
+                status,
+                body: response.text().await?,
+            });
         }
-
-        let mut init = RequestInit {
-            method: req.method.into(),
-            headers,
-            ..Default::default()
-        };
-
-        if let Some(body_str) = req.body {
-            init.body = Some(wasm_bindgen::JsValue::from_str(&body_str));
-        }
-
-        let worker_req = Request::new_with_init(&req.url, &init)?;
-        let mut response = Fetch::Request(worker_req).send().await?;
-
-        Ok(HttpResponse {
-            status: response.status_code(),
-            body: response.text().await?,
-        })
     }
 }
 
