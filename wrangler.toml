@@ -2,6 +2,12 @@ name = "verwatch"
 main = "build/worker/shim.mjs"
 compatibility_date = "2023-01-01"
 
+# 显式开启 workers.dev 域名
+workers_dev = true
+
+# 显式开启预览功能
+preview_urls = true
+
 # 绑定 KV 存储
 [[kv_namespaces]]
 binding = "VERSION_STORE"
@@ -25,9 +31,3 @@ crons = ["0 * * * *"]
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"
-
-# 显式开启 workers.dev 域名
-workers_dev = true
-
-# 显式开启预览功能
-preview_urls = true
