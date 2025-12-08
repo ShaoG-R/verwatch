@@ -101,6 +101,7 @@ command = "cargo install -q worker-build && worker-build --release"
    wrangler secret put MY_GITHUB_PAT
    # 输入您的 GitHub PAT (Fine-grained personal access tokens 下勾选Context，设置Read and Write)
    ```
+   *注意：如果您的某些项目需要特殊的 Token，可以在项目配置中指定 Secret 变量名，并额外添加对应的 Secret。*
 
 ### 5. 部署到 Cloudflare
 
@@ -163,7 +164,8 @@ curl -X POST [https://verwatch.your-subdomain.workers.dev/api/projects](https://
     "upstream_repo": "fail2ban",
     "my_owner": "my-github-user",
     "my_repo": "my-forked-repo",
-    "comparison_mode": "published_at"
+    "comparison_mode": "published_at",
+    "dispatch_token_secret": "MY_CUSTOM_TOKEN_VAR"
   }'
 ```
 
@@ -171,7 +173,7 @@ curl -X POST [https://verwatch.your-subdomain.workers.dev/api/projects](https://
 - `upstream_owner/repo`: 您想要监控的上游仓库。
 - `my_owner/repo`: 您想要触发更新的下游仓库（您自己的仓库）。
 - `comparison_mode`: (必填) `published_at` (推荐) 或 `updated_at`。
-- `dispatch_token`: (可选) 如果该仓库需要特定的 Token，可以在此覆盖全局 Token。
+- `dispatch_token_secret`: (可选) **重要更新**：此处需填写在 `wrangler` Secrets 或 Vars 中配置的**变量名称**（例如 `MY_CUSTOM_TOKEN_VAR`），而不是 Token 明文。如果不填，默认使用全局配置的 `MY_GITHUB_PAT`。
 
 ### 2. 查看监控列表 (GET)
 
@@ -181,7 +183,13 @@ curl [https://verwatch.your-subdomain.workers.dev/api/projects](https://verwatch
 
 ### 3. 删除监控项目 (DELETE)
 
-需要提供项目的唯一 ID (即 `unique_key`)，可以通过查看监控列表获取。
+我们提供两种删除模式，请根据需求选择。
+
+**方式 A: 标准删除 (Standard Delete)**
+仅执行删除操作，不返回旧数据。响应快，语义标准。
+
+- **Endpoint**: `DELETE /api/projects`
+- **Response**: `204 No Content`
 
 ```bash
 curl -X DELETE [https://verwatch.your-subdomain.workers.dev/api/projects](https://verwatch.your-subdomain.workers.dev/api/projects) \
@@ -192,9 +200,24 @@ curl -X DELETE [https://verwatch.your-subdomain.workers.dev/api/projects](https:
   }'
 ```
 
+**方式 B: 移除并获取 (Pop & Delete)**
+删除配置，并在响应中返回被删除的配置详情。
+
+- **Endpoint**: `DELETE /api/projects/pop`
+- **Response**: `200 OK` (Body: 被删除的 Config JSON)
+
+```bash
+curl -X DELETE [https://verwatch.your-subdomain.workers.dev/api/projects/pop](https://verwatch.your-subdomain.workers.dev/api/projects/pop) \
+  -H "X-Auth-Key: my_super_secure_password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "fail2ban/fail2ban->my-github-user/my-forked-repo"
+  }'
+```
+
 ### 4. 手动触发检查 (调试用)
 
-由于 Cloudflare Worker 的 Cron 触发器在开发环境较难测试，您可以暂时在 `lib.rs` 中添加一个临时的 HTTP 路由来手动调用 `WatchdogService` 的 `run_all` 方法，或者直接等待定时任务执行。
+由于 Cloudflare Worker 的 Cron 触发器在开发环境较难测试，您可以等待定时任务执行，或者在本地使用 `wrangler dev --test-scheduled` 进行模拟。
 
 ---
 

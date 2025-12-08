@@ -1,7 +1,7 @@
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::time::Duration;
-use worker::{Delay, Error, Fetch, Headers, Request, RequestInit, Result, wasm_bindgen};
+use worker::{wasm_bindgen, Delay, Error, Fetch, Headers, Request, RequestInit, Result};
 
 #[cfg(test)]
 use std::cell::RefCell;
@@ -149,8 +149,9 @@ impl HttpClient for WorkerHttpClient {
 pub struct MockHttpClient {
     // (URL, (Status, Response Body))
     responses: RefCell<HashMap<String, (u16, String)>>,
-    // 记录发出的请求 (URL, Method, Body)
-    pub requests: RefCell<Vec<(String, String, Option<String>)>>,
+    // 记录发出的请求 (URL, Method, Headers, Body)
+    // 更新：添加 Headers 记录
+    pub requests: RefCell<Vec<(String, String, HashMap<String, String>, Option<String>)>>,
 }
 
 #[cfg(test)]
@@ -176,6 +177,7 @@ impl HttpClient for MockHttpClient {
         self.requests.borrow_mut().push((
             req.url.clone(),
             format!("{:?}", req.method),
+            req.headers.clone(), // 记录 Headers
             req.body.clone(),
         ));
 
