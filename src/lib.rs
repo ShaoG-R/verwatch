@@ -45,6 +45,47 @@ macro_rules! log_error {
 }
 
 // =========================================================
+// 响应处理宏 (Response Handling Macros)
+// =========================================================
+
+macro_rules! unwrap_or_resp {
+    ($expr:expr, $log_prefix:expr, $code:expr) => {
+        match $expr {
+            Ok(v) => v,
+            Err(e) => {
+                log_error!("{}: {}", $log_prefix, e);
+                let msg = match $code {
+                    400 => "Bad Request",
+                    _ => "Internal Server Error",
+                };
+                return Response::error(msg, $code);
+            }
+        }
+    };
+}
+
+macro_rules! respond {
+    (json, $expr:expr, $log_prefix:expr) => {
+        match $expr {
+            Ok(v) => Response::from_json(&v),
+            Err(e) => {
+                log_error!("{}: {}", $log_prefix, e);
+                Response::error("Internal Server Error", 500)
+            }
+        }
+    };
+    (empty, $expr:expr, $log_prefix:expr) => {
+        match $expr {
+            Ok(_) => Response::empty(),
+            Err(e) => {
+                log_error!("{}: {}", $log_prefix, e);
+                Response::error("Internal Server Error", 500)
+            }
+        }
+    };
+}
+
+// =========================================================
 // 抽象接口：SecretResolver (用于解耦 Env 和 Service)
 // =========================================================
 
@@ -456,65 +497,89 @@ fn ensure_admin_auth(
     Ok(())
 }
 
+async fn list_projects(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let cfg = RuntimeConfig::new(&ctx.env);
+    if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
+        return Ok(res);
+    }
+
+    let repo = unwrap_or_resp!(
+        KvProjectRepository::new(&ctx.env, &cfg),
+        "Repo init failed",
+        500
+    );
+    respond!(json, repo.get_all_configs().await, "Get configs failed")
+}
+
+async fn create_project(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let cfg = RuntimeConfig::new(&ctx.env);
+    if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
+        return Ok(res);
+    }
+
+    let req_data: BaseProjectConfig =
+        unwrap_or_resp!(req.json().await, "Invalid request body", 400);
+
+    let repo = unwrap_or_resp!(
+        KvProjectRepository::new(&ctx.env, &cfg),
+        "Repo init failed",
+        500
+    );
+
+    respond!(json, repo.add_config(req_data).await, "Add config failed")
+}
+
+#[derive(Deserialize)]
+struct DeleteTarget {
+    id: String,
+}
+
+async fn delete_project(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let cfg = RuntimeConfig::new(&ctx.env);
+    if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
+        return Ok(res);
+    }
+
+    let target: DeleteTarget = unwrap_or_resp!(req.json().await, "Invalid request body", 400);
+    let repo = unwrap_or_resp!(
+        KvProjectRepository::new(&ctx.env, &cfg),
+        "Repo init failed",
+        500
+    );
+
+    respond!(
+        empty,
+        repo.delete_config(&target.id).await,
+        "Delete config failed"
+    )
+}
+
+async fn pop_project(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let cfg = RuntimeConfig::new(&ctx.env);
+    if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
+        return Ok(res);
+    }
+
+    let target: DeleteTarget = unwrap_or_resp!(req.json().await, "Invalid request body", 400);
+    let repo = unwrap_or_resp!(
+        KvProjectRepository::new(&ctx.env, &cfg),
+        "Repo init failed",
+        500
+    );
+
+    respond!(json, repo.pop_config(&target.id).await, "Pop config failed")
+}
+
 #[event(fetch)]
 pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     console_error_panic_hook::set_once();
     let router = Router::new();
 
-    #[derive(Deserialize)]
-    struct DeleteTarget {
-        id: String,
-    }
-
     router
-        .get_async("/api/projects", |req, ctx| async move {
-            let cfg = RuntimeConfig::new(&ctx.env);
-            if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
-                return Ok(res);
-            }
-
-            let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
-            let configs = repo.get_all_configs().await?;
-            Response::from_json(&configs)
-        })
-        .post_async("/api/projects", |mut req, ctx| async move {
-            let cfg = RuntimeConfig::new(&ctx.env);
-            if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
-                return Ok(res);
-            }
-
-            let req_data: BaseProjectConfig = req.json().await?;
-            let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
-            let saved_config = repo.add_config(req_data).await?;
-
-            Response::from_json(&saved_config)
-        })
-        // 接口 1: 标准删除，返回 204 No Content
-        .delete_async("/api/projects", |mut req, ctx| async move {
-            let cfg = RuntimeConfig::new(&ctx.env);
-            if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
-                return Ok(res);
-            }
-
-            let target: DeleteTarget = req.json().await?;
-            let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
-
-            repo.delete_config(&target.id).await?;
-            Response::empty() // 204
-        })
-        // 接口 2: 弹出删除 (原逻辑改名)，返回 200 + Config Body
-        .delete_async("/api/projects/pop", |mut req, ctx| async move {
-            let cfg = RuntimeConfig::new(&ctx.env);
-            if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
-                return Ok(res);
-            }
-
-            let target: DeleteTarget = req.json().await?;
-            let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
-
-            let deleted_config = repo.pop_config(&target.id).await?;
-            Response::from_json(&deleted_config)
-        })
+        .get_async("/api/projects", list_projects)
+        .post_async("/api/projects", create_project)
+        .delete_async("/api/projects", delete_project)
+        .delete_async("/api/projects/pop", pop_project)
         .run(req, env)
         .await
 }
