@@ -453,8 +453,10 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     }
 
     router
-        .get_async("/api/projects", |_, ctx| async move {
+        .get_async("/api/projects", |req, ctx| async move {
             let cfg = RuntimeConfig::new(&ctx.env);
+            ensure_admin_auth(&req, &ctx.env, &cfg)?;
+
             let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
             let configs = repo.get_all_configs().await?;
             Response::from_json(&configs)

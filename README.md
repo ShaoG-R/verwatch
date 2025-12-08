@@ -178,7 +178,8 @@ curl -X POST [https://verwatch.your-subdomain.workers.dev/api/projects](https://
 ### 2. 查看监控列表 (GET)
 
 ```bash
-curl [https://verwatch.your-subdomain.workers.dev/api/projects](https://verwatch.your-subdomain.workers.dev/api/projects)
+curl [https://verwatch.your-subdomain.workers.dev/api/projects](https://verwatch.your-subdomain.workers.dev/api/projects) \
+  -H "X-Auth-Key: my_super_secure_password"
 ```
 
 ### 3. 删除监控项目 (DELETE)
