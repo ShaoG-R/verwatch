@@ -112,6 +112,39 @@ wrangler deploy
 
 部署成功后，您将获得一个 Worker URL，例如 `https://verwatch.your-subdomain.workers.dev`。
 
+### 6. 使用 GitHub Actions 自动部署 (可选)
+
+如果您希望通过 GitHub Actions 实现自动化部署（CI/CD），请在 GitHub 仓库的 **Settings -> Secrets and variables -> Actions** 中配置以下 Repository Secret：
+
+* **`CLOUDFLARE_API_TOKEN`** (必需): 您的 Cloudflare API Token。
+    * 创建地址：[Cloudflare Profile > API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+    * 权限模板：选择 "Edit Cloudflare Workers"。
+
+> **注意**：以往版本可能需要配置 `CLOUDFLARE_ACCOUNT_ID`，但最新版 `wrangler-action` 会自动处理，**现在已不需要设置 Account ID**。
+
+**推荐的 Workflow 配置 (`.github/workflows/deploy.yml`)：**
+
+```yaml
+name: Deploy Worker
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          wranglerVersion: "4"
+```
+
 ---
 
 ## 🎮 使用指南
