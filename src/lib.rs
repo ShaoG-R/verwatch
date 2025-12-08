@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use worker::*;
 
 pub mod api;
@@ -96,21 +95,41 @@ impl Default for ComparisonMode {
     }
 }
 
-fn default_id() -> String {
-    Uuid::new_v4().to_string()
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProjectConfig {
-    #[serde(default = "default_id")]
-    pub id: String,
+    pub unique_key: String,
     pub upstream_owner: String,
     pub upstream_repo: String,
     pub my_owner: String,
     pub my_repo: String,
     pub dispatch_token: Option<String>,
-    #[serde(default)]
     pub comparison_mode: ComparisonMode,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateProjectRequest {
+    pub upstream_owner: String,
+    pub upstream_repo: String,
+    pub my_owner: String,
+    pub my_repo: String,
+    pub dispatch_token: Option<String>,
+    pub comparison_mode: ComparisonMode,
+}
+
+impl From<CreateProjectRequest> for ProjectConfig {
+    fn from(req: CreateProjectRequest) -> Self {
+        let mut config = ProjectConfig {
+            unique_key: String::new(),
+            upstream_owner: req.upstream_owner,
+            upstream_repo: req.upstream_repo,
+            my_owner: req.my_owner,
+            my_repo: req.my_repo,
+            dispatch_token: req.dispatch_token,
+            comparison_mode: req.comparison_mode,
+        };
+        config.unique_key = config.generate_unique_key();
+        config
+    }
 }
 
 impl ProjectConfig {
@@ -118,7 +137,7 @@ impl ProjectConfig {
         format!("v:{}/{}", self.upstream_owner, self.upstream_repo)
     }
 
-    pub fn unique_key(&self) -> String {
+    pub fn generate_unique_key(&self) -> String {
         format!(
             "{}/{}->{}/{}",
             self.upstream_owner, self.upstream_repo, self.my_owner, self.my_repo
@@ -193,45 +212,22 @@ impl Repository for KvProjectRepository {
         Ok(configs)
     }
 
-    async fn add_config(&self, mut config: ProjectConfig) -> Result<ProjectConfig> {
-        // 1. Check Index for existing ID by Unique Key
-        let unique_key = config.unique_key();
-        let index_key = format!("idx:{}", unique_key);
-
-        let existing_id = self.kv.get(&index_key).text().await?;
-
-        // Use existing ID if available, otherwise use config's ID or generate new
-        let final_id = if let Some(id) = existing_id {
-            id
-        } else {
-            // Ensure ID is set
-            config.id.clone()
-        };
-
-        // Update config with final ID (in case it changed or was generated separately in a way we want to enforce)
-        config.id = final_id.clone();
-
+    async fn add_config(&self, config: ProjectConfig) -> Result<ProjectConfig> {
         // 2. Save Config
         self.kv
-            .put(&format!("p:{}", final_id), &config)?
+            .put(&format!("p:{}", config.unique_key), &config)?
             .execute()
             .await?;
 
-        // 3. Save Index
-        self.kv.put(&index_key, &final_id)?.execute().await?;
-
+        // 不需要单独的索引了，因为 ID 就是 Key
         Ok(config)
     }
 
     async fn delete_config(&self, id: &str) -> Result<bool> {
         let project_key = format!("p:{}", id);
 
-        // Get config to find unique_key for index cleanup
-        let config = self.kv.get(&project_key).json::<ProjectConfig>().await?;
-
-        if let Some(c) = config {
-            let index_key = format!("idx:{}", c.unique_key());
-            self.kv.delete(&index_key).await?;
+        let val = self.kv.get(&project_key).text().await?;
+        if val.is_some() {
             self.kv.delete(&project_key).await?;
             Ok(true)
         } else {
@@ -369,7 +365,8 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let cfg = RuntimeConfig::new(&ctx.env);
             ensure_admin_auth(&req, &ctx.env, &cfg)?;
 
-            let new_config: ProjectConfig = req.json().await?;
+            let req_data: CreateProjectRequest = req.json().await?;
+            let new_config: ProjectConfig = req_data.into();
 
             let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
             let saved_config = repo.add_config(new_config).await?;
@@ -389,7 +386,7 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
 
             if repo.delete_config(&target.id).await? {
-                Response::ok("Project deleted")
+                Response::from_body(ResponseBody::Body(vec![])) // 200 OK
             } else {
                 Response::error("Not found", 404)
             }
@@ -466,13 +463,13 @@ mod tests {
         async fn add_config(&self, config: ProjectConfig) -> Result<ProjectConfig> {
             self.configs
                 .borrow_mut()
-                .retain(|c| c.unique_key() != config.unique_key());
+                .retain(|c| c.generate_unique_key() != config.generate_unique_key());
             self.configs.borrow_mut().push(config.clone());
             Ok(config)
         }
         async fn delete_config(&self, id: &str) -> Result<bool> {
             let len_before = self.configs.borrow().len();
-            self.configs.borrow_mut().retain(|c| c.id != id);
+            self.configs.borrow_mut().retain(|c| c.unique_key != id);
             Ok(self.configs.borrow().len() < len_before)
         }
         async fn get_last_version_time(&self, config: &ProjectConfig) -> Result<Option<String>> {
@@ -498,7 +495,8 @@ mod tests {
             my_repo: "mr".into(),
             dispatch_token: None,
             comparison_mode: ComparisonMode::PublishedAt,
-            id: "test-id".to_string(),
+
+            unique_key: String::new(), // Placeholder
         };
 
         repo.update_last_version_time(&config, "2023-01-01T00:00:00Z")
@@ -537,7 +535,8 @@ mod tests {
             my_repo: "mr".into(),
             dispatch_token: None,
             comparison_mode: ComparisonMode::PublishedAt,
-            id: "test-id".to_string(),
+
+            unique_key: String::new(), // Placeholder
         };
 
         repo.update_last_version_time(&config, "2023-01-01T00:00:00Z")

@@ -170,7 +170,7 @@ curl -X POST [https://verwatch.your-subdomain.workers.dev/api/projects](https://
 **字段说明**:
 - `upstream_owner/repo`: 您想要监控的上游仓库。
 - `my_owner/repo`: 您想要触发更新的下游仓库（您自己的仓库）。
-- `comparison_mode`: `published_at` (推荐) 或 `updated_at`。
+- `comparison_mode`: (必填) `published_at` (推荐) 或 `updated_at`。
 - `dispatch_token`: (可选) 如果该仓库需要特定的 Token，可以在此覆盖全局 Token。
 
 ### 2. 查看监控列表 (GET)
@@ -181,13 +181,14 @@ curl [https://verwatch.your-subdomain.workers.dev/api/projects](https://verwatch
 
 ### 3. 删除监控项目 (DELETE)
 
+需要提供项目的唯一 ID (即 `unique_key`)，可以通过查看监控列表获取。
+
 ```bash
 curl -X DELETE [https://verwatch.your-subdomain.workers.dev/api/projects](https://verwatch.your-subdomain.workers.dev/api/projects) \
   -H "X-Auth-Key: my_super_secure_password" \
   -H "Content-Type: application/json" \
   -d '{
-    "upstream_owner": "fail2ban",
-    "upstream_repo": "fail2ban"
+    "id": "fail2ban/fail2ban->my-github-user/my-forked-repo"
   }'
 ```
 
