@@ -50,7 +50,7 @@ id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 ### 3. 配置 `wrangler.toml`
 
-在项目根目录创建 `wrangler.toml` 文件。请将上一步获得的 KV ID 填入：
+在项目根目录修改 `wrangler.toml` 文件。请将上一步获得的 KV ID 填入：
 
 ```toml
 name = "verwatch"

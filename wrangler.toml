@@ -1,0 +1,27 @@
+name = "verwatch"
+main = "build/worker/shim.mjs"
+compatibility_date = "2023-01-01"
+
+# 绑定 KV 存储
+[[kv_namespaces]]
+binding = "VERSION_STORE"
+id = "bcd8a6e3982b4d199cdce17defd108a4"
+
+# 环境变量配置 (Vars)
+[vars]
+# KV 绑定名称，需与上面的 binding 保持一致
+KV_BINDING = "VERSION_STORE"
+# 存储监控列表的 Key
+CONFIG_KEY = "WATCH_LIST_CONFIG"
+# 以下变量定义了 Secret 的"变量名"，保持默认即可
+ADMIN_SECRET_NAME = "ADMIN_SECRET"
+GITHUB_TOKEN_NAME = "GITHUB_TOKEN"
+PAT_TOKEN_NAME = "MY_GITHUB_PAT"
+
+# 定时任务配置 (Cron Triggers)
+# 示例：每小时运行一次
+[triggers]
+crons = ["0 * * * *"]
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
