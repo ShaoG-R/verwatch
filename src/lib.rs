@@ -429,22 +429,36 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
         == 0
 }
 
-fn ensure_admin_auth(req: &Request, env: &Env, config: &RuntimeConfig) -> Result<()> {
-    let auth_header = req.headers().get(HEADER_AUTH_KEY)?.unwrap_or_default();
+fn ensure_admin_auth(
+    req: &Request,
+    env: &Env,
+    config: &RuntimeConfig,
+) -> std::result::Result<(), Response> {
+    let check = |req: &Request| -> Result<()> {
+        let auth_header = req.headers().get(HEADER_AUTH_KEY)?.unwrap_or_default();
 
-    let secret = env
-        .secret(&config.admin_secret_name)
-        .map(|s| s.to_string())
-        .unwrap_or_default();
+        let secret = env
+            .secret(&config.admin_secret_name)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
 
-    if secret.is_empty() || !constant_time_eq(&auth_header, &secret) {
-        return Err(Error::from("Unauthorized"));
+        if secret.is_empty() || !constant_time_eq(&auth_header, &secret) {
+            return Err(Error::from("Unauthorized"));
+        }
+        Ok(())
+    };
+
+    if let Err(e) = check(req) {
+        log_error!("Auth Check Failed: {}", e);
+        // Explicitly return 401 Response on failure
+        return Err(Response::error("Unauthorized", 401).unwrap());
     }
     Ok(())
 }
 
 #[event(fetch)]
 pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
+    console_error_panic_hook::set_once();
     let router = Router::new();
 
     #[derive(Deserialize)]
@@ -455,7 +469,9 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     router
         .get_async("/api/projects", |req, ctx| async move {
             let cfg = RuntimeConfig::new(&ctx.env);
-            ensure_admin_auth(&req, &ctx.env, &cfg)?;
+            if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
+                return Ok(res);
+            }
 
             let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
             let configs = repo.get_all_configs().await?;
@@ -463,7 +479,9 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         })
         .post_async("/api/projects", |mut req, ctx| async move {
             let cfg = RuntimeConfig::new(&ctx.env);
-            ensure_admin_auth(&req, &ctx.env, &cfg)?;
+            if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
+                return Ok(res);
+            }
 
             let req_data: BaseProjectConfig = req.json().await?;
             let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
@@ -474,7 +492,9 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         // 接口 1: 标准删除，返回 204 No Content
         .delete_async("/api/projects", |mut req, ctx| async move {
             let cfg = RuntimeConfig::new(&ctx.env);
-            ensure_admin_auth(&req, &ctx.env, &cfg)?;
+            if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
+                return Ok(res);
+            }
 
             let target: DeleteTarget = req.json().await?;
             let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
@@ -485,7 +505,9 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         // 接口 2: 弹出删除 (原逻辑改名)，返回 200 + Config Body
         .delete_async("/api/projects/pop", |mut req, ctx| async move {
             let cfg = RuntimeConfig::new(&ctx.env);
-            ensure_admin_auth(&req, &ctx.env, &cfg)?;
+            if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
+                return Ok(res);
+            }
 
             let target: DeleteTarget = req.json().await?;
             let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
