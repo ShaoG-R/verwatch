@@ -66,8 +66,6 @@ id = "<替换为你的_KV_ID>"
 [vars]
 # KV 绑定名称，需与上面的 binding 保持一致
 KV_BINDING = "VERSION_STORE"
-# 存储监控列表的 Key
-CONFIG_KEY = "WATCH_LIST_CONFIG"
 # 以下变量定义了 Secret 的"变量名"，保持默认即可
 ADMIN_SECRET_NAME = "ADMIN_SECRET"
 GITHUB_TOKEN_NAME = "GITHUB_TOKEN"

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 use worker::*;
 
 pub mod api;
@@ -37,7 +38,6 @@ macro_rules! log_error {
 
 /// 这些是默认值，如果 wranger.toml 的 [vars] 中没有定义，则使用这些值
 const DEFAULT_KV_BINDING: &str = "VERSION_STORE";
-const DEFAULT_CONFIG_KEY: &str = "WATCH_LIST_CONFIG";
 const DEFAULT_SECRET_VAR_NAME: &str = "ADMIN_SECRET";
 const DEFAULT_GITHUB_TOKEN_VAR_NAME: &str = "GITHUB_TOKEN";
 const DEFAULT_PAT_VAR_NAME: &str = "MY_GITHUB_PAT";
@@ -46,7 +46,6 @@ const DEFAULT_PAT_VAR_NAME: &str = "MY_GITHUB_PAT";
 /// 负责从 Env 中读取 [vars]，实现配置解耦
 struct RuntimeConfig {
     kv_binding: String,
-    config_store_key: String,
     admin_secret_name: String,
     github_token_name: String,
     pat_token_name: String,
@@ -60,12 +59,6 @@ impl RuntimeConfig {
                 .var("KV_BINDING")
                 .map(|v| v.to_string())
                 .unwrap_or_else(|_| DEFAULT_KV_BINDING.to_string()),
-
-            // 尝试读取 [vars] CONFIG_KEY
-            config_store_key: env
-                .var("CONFIG_KEY")
-                .map(|v| v.to_string())
-                .unwrap_or_else(|_| DEFAULT_CONFIG_KEY.to_string()),
 
             // 尝试读取 [vars] ADMIN_SECRET_NAME (比如你想改成 "MY_APP_PASSWORD")
             admin_secret_name: env
@@ -103,8 +96,14 @@ impl Default for ComparisonMode {
     }
 }
 
+fn default_id() -> String {
+    Uuid::new_v4().to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProjectConfig {
+    #[serde(default = "default_id")]
+    pub id: String,
     pub upstream_owner: String,
     pub upstream_repo: String,
     pub my_owner: String,
@@ -119,7 +118,7 @@ impl ProjectConfig {
         format!("v:{}/{}", self.upstream_owner, self.upstream_repo)
     }
 
-    pub fn id(&self) -> String {
+    pub fn unique_key(&self) -> String {
         format!(
             "{}/{}->{}/{}",
             self.upstream_owner, self.upstream_repo, self.my_owner, self.my_repo
@@ -154,14 +153,14 @@ impl GitHubRelease {
 #[async_trait::async_trait(?Send)]
 pub trait Repository {
     async fn get_all_configs(&self) -> Result<Vec<ProjectConfig>>;
-    async fn save_configs(&self, configs: &Vec<ProjectConfig>) -> Result<()>;
+    async fn add_config(&self, config: ProjectConfig) -> Result<ProjectConfig>;
+    async fn delete_config(&self, id: &str) -> Result<bool>;
     async fn get_last_version_time(&self, config: &ProjectConfig) -> Result<Option<String>>;
     async fn update_last_version_time(&self, config: &ProjectConfig, time: &str) -> Result<()>;
 }
 
 struct KvProjectRepository {
     kv: KvStore,
-    config_key: String, // 存储配置的 key 现在是动态的
 }
 
 impl KvProjectRepository {
@@ -169,7 +168,6 @@ impl KvProjectRepository {
     fn new(env: &Env, config: &RuntimeConfig) -> Result<Self> {
         Ok(Self {
             kv: env.kv(&config.kv_binding)?, // 使用动态的 Binding Name
-            config_key: config.config_store_key.clone(),
         })
     }
 }
@@ -177,20 +175,68 @@ impl KvProjectRepository {
 #[async_trait::async_trait(?Send)]
 impl Repository for KvProjectRepository {
     async fn get_all_configs(&self) -> Result<Vec<ProjectConfig>> {
-        match self
-            .kv
-            .get(&self.config_key)
-            .json::<Vec<ProjectConfig>>()
-            .await?
-        {
-            Some(list) => Ok(list),
-            None => Ok(vec![]),
+        let list = self.kv.list().prefix("p:".to_string()).execute().await?;
+        let keys: Vec<String> = list.keys.into_iter().map(|k| k.name).collect();
+
+        let mut futures = Vec::new();
+        for key in &keys {
+            futures.push(self.kv.get(key).json::<ProjectConfig>());
         }
+
+        let results = futures::future::join_all(futures).await;
+        let mut configs = Vec::new();
+        for res in results {
+            if let Ok(Some(cfg)) = res {
+                configs.push(cfg);
+            }
+        }
+        Ok(configs)
     }
 
-    async fn save_configs(&self, configs: &Vec<ProjectConfig>) -> Result<()> {
-        self.kv.put(&self.config_key, configs)?.execute().await?;
-        Ok(())
+    async fn add_config(&self, mut config: ProjectConfig) -> Result<ProjectConfig> {
+        // 1. Check Index for existing ID by Unique Key
+        let unique_key = config.unique_key();
+        let index_key = format!("idx:{}", unique_key);
+
+        let existing_id = self.kv.get(&index_key).text().await?;
+
+        // Use existing ID if available, otherwise use config's ID or generate new
+        let final_id = if let Some(id) = existing_id {
+            id
+        } else {
+            // Ensure ID is set
+            config.id.clone()
+        };
+
+        // Update config with final ID (in case it changed or was generated separately in a way we want to enforce)
+        config.id = final_id.clone();
+
+        // 2. Save Config
+        self.kv
+            .put(&format!("p:{}", final_id), &config)?
+            .execute()
+            .await?;
+
+        // 3. Save Index
+        self.kv.put(&index_key, &final_id)?.execute().await?;
+
+        Ok(config)
+    }
+
+    async fn delete_config(&self, id: &str) -> Result<bool> {
+        let project_key = format!("p:{}", id);
+
+        // Get config to find unique_key for index cleanup
+        let config = self.kv.get(&project_key).json::<ProjectConfig>().await?;
+
+        if let Some(c) = config {
+            let index_key = format!("idx:{}", c.unique_key());
+            self.kv.delete(&index_key).await?;
+            self.kv.delete(&project_key).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     async fn get_last_version_time(&self, config: &ProjectConfig) -> Result<Option<String>> {
@@ -324,14 +370,11 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             ensure_admin_auth(&req, &ctx.env, &cfg)?;
 
             let new_config: ProjectConfig = req.json().await?;
+
             let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
+            let saved_config = repo.add_config(new_config).await?;
 
-            let mut configs = repo.get_all_configs().await?;
-            configs.retain(|c| c.id() != new_config.id());
-            configs.push(new_config);
-
-            repo.save_configs(&configs).await?;
-            Response::ok("Project added")
+            Response::from_json(&saved_config)
         })
         .delete_async("/api/projects", |mut req, ctx| async move {
             let cfg = RuntimeConfig::new(&ctx.env);
@@ -339,24 +382,17 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
             #[derive(Deserialize)]
             struct DeleteTarget {
-                upstream_owner: String,
-                upstream_repo: String,
+                id: String,
             }
             let target: DeleteTarget = req.json().await?;
 
             let repo = KvProjectRepository::new(&ctx.env, &cfg)?;
-            let mut configs = repo.get_all_configs().await?;
-            let len_before = configs.len();
-            configs.retain(|c| {
-                !(c.upstream_owner == target.upstream_owner
-                    && c.upstream_repo == target.upstream_repo)
-            });
 
-            if configs.len() == len_before {
-                return Response::error("Not found", 404);
+            if repo.delete_config(&target.id).await? {
+                Response::ok("Project deleted")
+            } else {
+                Response::error("Not found", 404)
             }
-            repo.save_configs(&configs).await?;
-            Response::ok("Project deleted")
         })
         .run(req, env)
         .await
@@ -427,9 +463,17 @@ mod tests {
         async fn get_all_configs(&self) -> Result<Vec<ProjectConfig>> {
             Ok(self.configs.borrow().clone())
         }
-        async fn save_configs(&self, configs: &Vec<ProjectConfig>) -> Result<()> {
-            *self.configs.borrow_mut() = configs.clone();
-            Ok(())
+        async fn add_config(&self, config: ProjectConfig) -> Result<ProjectConfig> {
+            self.configs
+                .borrow_mut()
+                .retain(|c| c.unique_key() != config.unique_key());
+            self.configs.borrow_mut().push(config.clone());
+            Ok(config)
+        }
+        async fn delete_config(&self, id: &str) -> Result<bool> {
+            let len_before = self.configs.borrow().len();
+            self.configs.borrow_mut().retain(|c| c.id != id);
+            Ok(self.configs.borrow().len() < len_before)
         }
         async fn get_last_version_time(&self, config: &ProjectConfig) -> Result<Option<String>> {
             Ok(self.data.borrow().get(&config.version_store_key()).cloned())
@@ -454,12 +498,16 @@ mod tests {
             my_repo: "mr".into(),
             dispatch_token: None,
             comparison_mode: ComparisonMode::PublishedAt,
+            id: "test-id".to_string(),
         };
 
         repo.update_last_version_time(&config, "2023-01-01T00:00:00Z")
             .await
             .unwrap();
-        repo.save_configs(&vec![config.clone()]).await.unwrap();
+        repo.update_last_version_time(&config, "2023-01-01T00:00:00Z")
+            .await
+            .unwrap();
+        repo.add_config(config.clone()).await.unwrap();
 
         client.mock_response(
             "https://api.github.com/repos/u/r/releases/latest",
@@ -489,12 +537,16 @@ mod tests {
             my_repo: "mr".into(),
             dispatch_token: None,
             comparison_mode: ComparisonMode::PublishedAt,
+            id: "test-id".to_string(),
         };
 
         repo.update_last_version_time(&config, "2023-01-01T00:00:00Z")
             .await
             .unwrap();
-        repo.save_configs(&vec![config.clone()]).await.unwrap();
+        repo.update_last_version_time(&config, "2023-01-01T00:00:00Z")
+            .await
+            .unwrap();
+        repo.add_config(config.clone()).await.unwrap();
 
         client.mock_response(
             "https://api.github.com/repos/u/r/releases/latest",
