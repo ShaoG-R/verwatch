@@ -3,13 +3,12 @@ use std::collections::HashMap;
 use worker::{Error, Fetch, Headers, Request, RequestInit, Result, wasm_bindgen};
 
 #[cfg(test)]
-use reqwest;
+use std::cell::RefCell;
 
 // =========================================================
 // 核心抽象层 (HTTP Interface Abstraction)
 // =========================================================
 
-/// 通用 HTTP 方法枚举
 #[derive(Debug, Clone, Copy)]
 pub enum HttpMethod {
     Get,
@@ -29,7 +28,6 @@ impl From<HttpMethod> for worker::Method {
     }
 }
 
-/// 通用 HTTP 请求结构
 pub struct HttpRequest {
     pub url: String,
     pub method: HttpMethod,
@@ -58,7 +56,6 @@ impl HttpRequest {
     }
 }
 
-/// 通用 HTTP 响应结构
 pub struct HttpResponse {
     pub status: u16,
     pub body: String,
@@ -70,15 +67,13 @@ impl HttpResponse {
     }
 }
 
-/// HTTP 客户端特性 (Trait)
-/// 使用 async_trait 以支持异步调用，(?Send) 是因为 Worker 环境下某些类型不是 Send 的
 #[async_trait::async_trait(?Send)]
 pub trait HttpClient {
     async fn send(&self, req: HttpRequest) -> Result<HttpResponse>;
 }
 
 // =========================================================
-// 实现层: Worker 客户端 (Production)
+// 实现层: Worker 客户端
 // =========================================================
 
 #[derive(Clone)]
@@ -112,53 +107,55 @@ impl HttpClient for WorkerHttpClient {
     }
 }
 
+// =========================================================
+// 测试工具: MockHttpClient
+// =========================================================
+
 #[cfg(test)]
-#[derive(Clone)]
-pub struct ReqwestHttpClient {
-    client: reqwest::Client,
+pub struct MockHttpClient {
+    // (URL, (Status, Response Body))
+    responses: RefCell<HashMap<String, (u16, String)>>,
+    // 记录发出的请求 (URL, Method, Body)
+    pub requests: RefCell<Vec<(String, String, Option<String>)>>,
 }
 
 #[cfg(test)]
-impl ReqwestHttpClient {
+impl MockHttpClient {
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            responses: RefCell::new(HashMap::new()),
+            requests: RefCell::new(Vec::new()),
         }
+    }
+
+    pub fn mock_response(&self, url: &str, status: u16, body: serde_json::Value) {
+        self.responses
+            .borrow_mut()
+            .insert(url.to_string(), (status, body.to_string()));
     }
 }
 
 #[cfg(test)]
 #[async_trait::async_trait(?Send)]
-impl HttpClient for ReqwestHttpClient {
+impl HttpClient for MockHttpClient {
     async fn send(&self, req: HttpRequest) -> Result<HttpResponse> {
-        let method = match req.method {
-            HttpMethod::Get => reqwest::Method::GET,
-            HttpMethod::Post => reqwest::Method::POST,
-            HttpMethod::Put => reqwest::Method::PUT,
-            HttpMethod::Delete => reqwest::Method::DELETE,
-        };
+        self.requests.borrow_mut().push((
+            req.url.clone(),
+            format!("{:?}", req.method),
+            req.body.clone(),
+        ));
 
-        let mut builder = self.client.request(method, &req.url);
-
-        for (k, v) in req.headers {
-            builder = builder.header(k, v);
+        let responses = self.responses.borrow();
+        if let Some((status, body)) = responses.get(&req.url) {
+            Ok(HttpResponse {
+                status: *status,
+                body: body.clone(),
+            })
+        } else {
+            Ok(HttpResponse {
+                status: 404,
+                body: "Not Found".to_string(),
+            })
         }
-
-        if let Some(body) = req.body {
-            builder = builder.body(body);
-        }
-
-        let resp = builder
-            .send()
-            .await
-            .map_err(|e| Error::from(format!("Reqwest Error: {}", e)))?;
-
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .await
-            .map_err(|e| Error::from(format!("Reqwest Body Error: {}", e)))?;
-
-        Ok(HttpResponse { status, body })
     }
 }

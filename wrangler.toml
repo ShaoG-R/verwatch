@@ -3,19 +3,17 @@ main = "build/worker/shim.mjs"
 compatibility_date = "2024-12-01"
 
 [build]
-command = "cargo install -q worker-build && worker-build --release" # 确保使用 release 模式减小体积
+command = "cargo install -q worker-build && worker-build --release"
 
 [[kv_namespaces]]
 binding = "VERSION_STORE"
 id = "<你的_KV_ID>"      # 运行 `wrangler kv namespace create VERSION_STORE` 获取
 
 [triggers]
-crons = ["0 * * * *"]   # 每小时运行
+crons = ["0 * * * *"] 
 
 [vars]
-KV_KEY = "tokio_version"
-UPSTREAM_OWNER = "tokio-rs"
-UPSTREAM_REPO = "tokio"
-MY_OWNER = "your-username"
-MY_REPO = "your-repo"
-COMPARISON_MODE = "published_at" # 可选 "published_at" 或 "updated_at"
+# 新增：用于管理 API 的鉴权密钥
+# 建议在 Cloudflare Dashboard 中加密设置，不要明文写在这里
+# 运行 `wrangler secret put ADMIN_SECRET` 设置
+ADMIN_SECRET = "your-super-secret-password"
