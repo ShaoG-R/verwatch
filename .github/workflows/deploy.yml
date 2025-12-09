@@ -6,11 +6,9 @@ on:
       - main
     paths:
       - backend/**
+      - '!backend/**/*.md'
+      - '!backend/**/.gitignore'
       - .github/workflows/deploy.yml
-    paths-ignore:
-      - backend/**/*.md
-      - backend/.gitignore
-      - backend/**/.gitignore
 
 jobs:
   deploy:
