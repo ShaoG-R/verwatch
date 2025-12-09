@@ -34,3 +34,10 @@ crons = ["0 * * * *"]
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"
+
+[observability]
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
