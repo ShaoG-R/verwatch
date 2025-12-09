@@ -573,6 +573,17 @@ async fn pop_project(mut req: Request, ctx: RouteContext<()>) -> Result<Response
 #[event(fetch)]
 pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     console_error_panic_hook::set_once();
+
+    let cors = Cors::new()
+        .with_origins(vec!["*"])
+        .with_methods(vec![
+            Method::Get,
+            Method::Post,
+            Method::Delete,
+            Method::Options,
+        ])
+        .with_allowed_headers(vec!["Content-Type", HEADER_AUTH_KEY]);
+
     let router = Router::new();
 
     router
@@ -580,8 +591,11 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/api/projects", create_project)
         .delete_async("/api/projects", delete_project)
         .delete_async("/api/projects/pop", pop_project)
+        .options_async("/api/projects", |_, _| async { Response::empty() })
+        .options_async("/api/projects/pop", |_, _| async { Response::empty() })
         .run(req, env)
-        .await
+        .await?
+        .with_cors(&cors)
 }
 
 #[event(scheduled)]
