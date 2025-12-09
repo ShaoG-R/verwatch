@@ -1,16 +1,13 @@
 use worker::*;
 
+mod repository;
 pub mod service;
 pub(crate) mod utils {
-    pub mod repository;
     pub mod request;
 }
 
-// 导出 Durable Object 模块以供 Worker 运行时识别
-pub mod durable_object;
-
+use repository::{DoProjectRepository, Repository};
 use service::{EnvSecretResolver, WatchdogService};
-use utils::repository::{DoProjectRepository, Repository};
 use utils::request::WorkerHttpClient;
 use verwatch_shared::{CreateProjectRequest, DeleteTarget, HEADER_AUTH_KEY, ProjectConfig};
 

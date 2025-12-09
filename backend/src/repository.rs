@@ -1,3 +1,5 @@
+mod durable_object;
+
 use verwatch_shared::ProjectConfig;
 use worker::*;
 

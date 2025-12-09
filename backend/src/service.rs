@@ -4,7 +4,8 @@ use futures::{StreamExt, stream};
 use verwatch_shared::ProjectConfig;
 use worker::*;
 
-use crate::utils::{repository::Repository, request::HttpClient};
+use crate::repository::Repository;
+use crate::utils::request::HttpClient;
 use github_gateway::GitHubGateway;
 
 // =========================================================
@@ -175,7 +176,7 @@ impl<'a, C: HttpClient, R: Repository, S: SecretResolver> WatchdogService<'a, C,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::repository::tests::MockRepository;
+    use crate::repository::tests::MockRepository;
     use crate::utils::request::MockHttpClient;
     use serde_json::json;
     use std::collections::HashMap;
