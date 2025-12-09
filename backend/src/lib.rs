@@ -1,13 +1,13 @@
 use worker::*;
 
-pub mod repository;
 pub mod service;
 pub(crate) mod utils {
+    pub mod repository;
     pub mod request;
 }
 
-use repository::{KvProjectRepository, Repository};
 use service::{EnvSecretResolver, WatchdogService};
+use utils::repository::{KvProjectRepository, Repository};
 use utils::request::WorkerHttpClient;
 
 // =========================================================
