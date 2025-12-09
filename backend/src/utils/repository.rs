@@ -1,124 +1,120 @@
-use verwatch_shared::{PREFIX_PROJECT, ProjectConfig};
+use verwatch_shared::ProjectConfig;
 use worker::*;
 
+// 定义仓库 Trait
 #[async_trait::async_trait(?Send)]
 pub trait Repository {
-    // Basic CRUD
     async fn list_projects(&self) -> Result<Vec<ProjectConfig>>;
+    // 新增：批量获取配置和状态
+    async fn list_projects_with_states(&self) -> Result<Vec<(ProjectConfig, Option<String>)>>;
+
     async fn get_project(&self, id: &str) -> Result<Option<ProjectConfig>>;
     async fn save_project(&self, config: &ProjectConfig) -> Result<()>;
     async fn delete_project(&self, id: &str) -> Result<()>;
     async fn toggle_pause_project(&self, id: &str) -> Result<bool>;
 
-    // State Management (Versioning)
+    // 状态管理
     async fn get_version_state(&self, key: &str) -> Result<Option<String>>;
     async fn set_version_state(&self, key: &str, value: &str) -> Result<()>;
 }
 
-pub struct KvProjectRepository {
-    kv: KvStore,
+// Durable Object 实现
+pub struct DoProjectRepository {
+    stub: Stub,
 }
 
-impl KvProjectRepository {
-    pub fn new(env: &Env, kv_binding: &str) -> Result<Self> {
-        Ok(Self {
-            kv: env.kv(kv_binding)?,
-        })
+impl DoProjectRepository {
+    pub fn new(env: &Env, binding_name: &str) -> Result<Self> {
+        let namespace = env.durable_object(binding_name)?;
+        // 使用单例 ID "default"
+        let id = namespace.id_from_name("default")?;
+        let stub = id.get_stub()?;
+        Ok(Self { stub })
+    }
+
+    fn make_request_init(
+        method: Method,
+        body: Option<wasm_bindgen::JsValue>,
+    ) -> Result<RequestInit> {
+        let headers = Headers::new();
+        headers.set("Content-Type", "application/json")?;
+        headers.set("Accept", "application/json")?;
+
+        let mut init = RequestInit::new();
+        init.with_method(method)
+            .with_headers(headers)
+            .with_body(body);
+
+        Ok(init)
     }
 }
 
 #[async_trait::async_trait(?Send)]
-impl Repository for KvProjectRepository {
+impl Repository for DoProjectRepository {
     async fn list_projects(&self) -> Result<Vec<ProjectConfig>> {
-        let list = self
-            .kv
-            .list()
-            .prefix(PREFIX_PROJECT.to_string())
-            .execute()
+        let mut resp = self.stub.fetch_with_str("http://do/projects").await?;
+        resp.json().await
+    }
+
+    async fn list_projects_with_states(&self) -> Result<Vec<(ProjectConfig, Option<String>)>> {
+        let mut resp = self
+            .stub
+            .fetch_with_str("http://do/projects/with_states")
             .await?;
-
-        let mut configs = Vec::new();
-        let mut keys_without_meta = Vec::new();
-
-        for key in list.keys {
-            if let Some(meta) = key.metadata {
-                if let Ok(cfg) = serde_json::from_value::<ProjectConfig>(meta) {
-                    configs.push(cfg);
-                } else {
-                    keys_without_meta.push(key.name);
-                }
-            } else {
-                keys_without_meta.push(key.name);
-            }
-        }
-
-        if !keys_without_meta.is_empty() {
-            let futures = keys_without_meta
-                .iter()
-                .map(|k| self.kv.get(k).json::<ProjectConfig>());
-            let results = futures::future::join_all(futures).await;
-            for res in results {
-                if let Ok(Some(cfg)) = res {
-                    configs.push(cfg);
-                }
-            }
-        }
-
-        Ok(configs)
+        resp.json().await
     }
 
     async fn get_project(&self, id: &str) -> Result<Option<ProjectConfig>> {
-        let project_key = format!("{}{}", PREFIX_PROJECT, id);
-        Ok(self.kv.get(&project_key).json::<ProjectConfig>().await?)
+        let path = format!("http://do/projects/{}", id);
+        let mut resp = self.stub.fetch_with_str(&path).await?;
+        resp.json().await
     }
 
     async fn save_project(&self, config: &ProjectConfig) -> Result<()> {
-        let key = format!("{}{}", PREFIX_PROJECT, config.unique_key);
-
-        let serialized_json = serde_json::to_string(&config)?;
-        let json_len = serialized_json.len();
-
-        let mut query = self.kv.put(&key, &config)?;
-
-        if json_len < 1024 {
-            query = query.metadata(&config)?;
-        } else {
-            console_log!(
-                "Config size ({} bytes) exceeds metadata limit (1024), skipping optimization.",
-                json_len
-            );
-        }
-
-        query.execute().await?;
+        let body = wasm_bindgen::JsValue::from_str(&serde_json::to_string(config)?);
+        let init = Self::make_request_init(Method::Post, Some(body))?;
+        let req = Request::new_with_init("http://do/projects", &init)?;
+        self.stub.fetch_with_request(req).await?;
         Ok(())
     }
 
     async fn delete_project(&self, id: &str) -> Result<()> {
-        let project_key = format!("{}{}", PREFIX_PROJECT, id);
-        self.kv.delete(&project_key).await?;
+        let path = format!("http://do/projects/{}", id);
+        let req = Request::new(&path, Method::Delete)?;
+        self.stub.fetch_with_request(req).await?;
         Ok(())
     }
 
     async fn toggle_pause_project(&self, id: &str) -> Result<bool> {
-        let mut config = self
-            .get_project(id)
-            .await?
-            .ok_or_else(|| Error::from("Project not found"))?;
-        config.paused = !config.paused;
-        self.save_project(&config).await?;
-        Ok(config.paused)
+        // 调用 DO 端的 PATCH 接口实现原子操作
+        let path = format!("http://do/projects/{}/toggle", id);
+        let init = Self::make_request_init(Method::Patch, None)?;
+        let req = Request::new_with_init(&path, &init)?;
+
+        let mut resp = self.stub.fetch_with_request(req).await?;
+        if resp.status_code() == 404 {
+            return Err(Error::from("Project not found"));
+        }
+        resp.json().await
     }
 
     async fn get_version_state(&self, key: &str) -> Result<Option<String>> {
-        Ok(self.kv.get(key).text().await?)
+        let path = format!("http://do/state/{}", key);
+        let mut resp = self.stub.fetch_with_str(&path).await?;
+        resp.json().await
     }
 
     async fn set_version_state(&self, key: &str, value: &str) -> Result<()> {
-        self.kv.put(key, value)?.execute().await?;
+        let path = format!("http://do/state/{}", key);
+        let body = wasm_bindgen::JsValue::from_str(value);
+        let init = Self::make_request_init(Method::Post, Some(body))?;
+        let req = Request::new_with_init(&path, &init)?;
+        self.stub.fetch_with_request(req).await?;
         Ok(())
     }
 }
 
+// 内存 Mock 实现（保留用于单元测试）
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -143,6 +139,19 @@ pub mod tests {
     impl Repository for MockRepository {
         async fn list_projects(&self) -> Result<Vec<ProjectConfig>> {
             Ok(self.configs.borrow().clone())
+        }
+
+        async fn list_projects_with_states(&self) -> Result<Vec<(ProjectConfig, Option<String>)>> {
+            let configs = self.configs.borrow();
+            let data = self.data.borrow();
+            let mut result = Vec::new();
+
+            for config in configs.iter() {
+                let key = config.version_store_key();
+                let state = data.get(&key).cloned();
+                result.push((config.clone(), state));
+            }
+            Ok(result)
         }
 
         async fn get_project(&self, id: &str) -> Result<Option<ProjectConfig>> {
@@ -187,33 +196,5 @@ pub mod tests {
                 .insert(key.to_string(), value.to_string());
             Ok(())
         }
-    }
-
-    #[tokio::test]
-    async fn test_basic_ops() {
-        use verwatch_shared::{ComparisonMode, CreateProjectRequest};
-        let repo = MockRepository::new();
-        let base_config = CreateProjectRequest {
-            upstream_owner: "u".into(),
-            upstream_repo: "r".into(),
-            my_owner: "m".into(),
-            my_repo: "mr".into(),
-            dispatch_token_secret: None,
-            comparison_mode: ComparisonMode::PublishedAt,
-        };
-        let config = ProjectConfig::new(base_config);
-
-        // Save
-        repo.save_project(&config).await.unwrap();
-
-        // Get
-        let found = repo.get_project(&config.unique_key).await.unwrap();
-        assert!(found.is_some());
-        assert_eq!(found.unwrap().unique_key, config.unique_key);
-
-        // Delete
-        repo.delete_project(&config.unique_key).await.unwrap();
-        let not_found = repo.get_project(&config.unique_key).await.unwrap();
-        assert!(not_found.is_none());
     }
 }

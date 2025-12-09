@@ -8,22 +8,23 @@ workers_dev = true
 # 显式开启预览功能
 preview_urls = true
 
-# 绑定 KV 存储
-[[kv_namespaces]]
-binding = "VERSION_STORE"
-id = "bcd8a6e3982b4d199cdce17defd108a4"
+# 替换 KV 为 Durable Object 绑定
+[durable_objects]
+bindings = [
+    # class_name 需与 durable_object.rs 中的 impl DurableObject for ProjectStore 中的 class_name 一致 
+    { name = "PROJECT_STORE", class_name = "ProjectStore" } 
+]
 
 # 环境变量配置 (Vars)
 [vars]
-# KV 绑定名称，需与上面的 binding 保持一致
-KV_BINDING = "VERSION_STORE"
-# 以下变量定义了 Secret 的"变量名"，保持默认即可
+# DO 绑定名称，需与上面的 binding 保持一致
+DO_BINDING = "PROJECT_STORE"
+# Secret 变量名配置
 ADMIN_SECRET_NAME = "ADMIN_SECRET"
 GITHUB_TOKEN_NAME = "GITHUB_TOKEN"
 PAT_TOKEN_NAME = "MY_GITHUB_PAT"
 
-# 定时任务配置 (Cron Triggers)
-# 示例：每小时运行一次
+# 定时任务配置
 [triggers]
 crons = ["0 * * * *"]
 

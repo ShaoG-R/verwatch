@@ -6,23 +6,25 @@ pub(crate) mod utils {
     pub mod request;
 }
 
+// 导出 Durable Object 模块以供 Worker 运行时识别
+pub mod durable_object;
+
 use service::{EnvSecretResolver, WatchdogService};
-use utils::repository::{KvProjectRepository, Repository};
+use utils::repository::{DoProjectRepository, Repository};
 use utils::request::WorkerHttpClient;
-
-// =========================================================
-// 常量定义 (Constants)
-// =========================================================
-
 use verwatch_shared::{CreateProjectRequest, DeleteTarget, HEADER_AUTH_KEY, ProjectConfig};
 
-const DEFAULT_KV_BINDING: &str = "VERSION_STORE";
+// =========================================================
+// 常量定义
+// =========================================================
+
+const DEFAULT_DO_BINDING: &str = "PROJECT_STORE";
 const DEFAULT_SECRET_VAR_NAME: &str = "ADMIN_SECRET";
 const DEFAULT_GITHUB_TOKEN_VAR_NAME: &str = "GITHUB_TOKEN";
 const DEFAULT_PAT_VAR_NAME: &str = "MY_GITHUB_PAT";
 
 // =========================================================
-// 跨平台日志宏
+// 日志宏
 // =========================================================
 
 #[cfg(target_arch = "wasm32")]
@@ -46,7 +48,7 @@ macro_rules! log_error {
 }
 
 // =========================================================
-// 响应处理宏 (Response Handling Macros)
+// 宏定义
 // =========================================================
 
 macro_rules! unwrap_or_resp {
@@ -91,7 +93,7 @@ macro_rules! respond {
 // =========================================================
 
 struct RuntimeConfig {
-    kv_binding: String,
+    do_binding: String,
     admin_secret_name: String,
     github_token_name: String,
     pat_token_name: String,
@@ -100,10 +102,10 @@ struct RuntimeConfig {
 impl RuntimeConfig {
     fn new(env: &Env) -> Self {
         Self {
-            kv_binding: env
-                .var("KV_BINDING")
+            do_binding: env
+                .var("DO_BINDING")
                 .map(|v| v.to_string())
-                .unwrap_or_else(|_| DEFAULT_KV_BINDING.to_string()),
+                .unwrap_or_else(|_| DEFAULT_DO_BINDING.to_string()),
             admin_secret_name: env
                 .var("ADMIN_SECRET_NAME")
                 .map(|v| v.to_string())
@@ -121,18 +123,16 @@ impl RuntimeConfig {
 }
 
 // =========================================================
-// 控制器层 (Controllers & Entry Points)
+// 鉴权辅助函数
 // =========================================================
 
 fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    let a_bytes = a.as_bytes();
-    let b_bytes = b.as_bytes();
-    a_bytes
+    a.as_bytes()
         .iter()
-        .zip(b_bytes)
+        .zip(b.as_bytes())
         .fold(0, |acc, (&x, &y)| acc | (x ^ y))
         == 0
 }
@@ -144,7 +144,6 @@ fn ensure_admin_auth(
 ) -> std::result::Result<(), Response> {
     let check = |req: &Request| -> Result<()> {
         let auth_header = req.headers().get(HEADER_AUTH_KEY)?.unwrap_or_default();
-
         let secret = env
             .secret(&config.admin_secret_name)
             .map(|s| s.to_string())
@@ -158,24 +157,25 @@ fn ensure_admin_auth(
 
     if let Err(e) = check(req) {
         log_error!("Auth Check Failed: {}", e);
-        // Explicitly return 401 Response on failure
         return Err(Response::error("Unauthorized", 401).unwrap());
     }
     Ok(())
 }
+
+// =========================================================
+// API Controllers
+// =========================================================
 
 async fn list_projects(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let cfg = RuntimeConfig::new(&ctx.env);
     if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
         return Ok(res);
     }
-
     let repo = unwrap_or_resp!(
-        KvProjectRepository::new(&ctx.env, &cfg.kv_binding),
+        DoProjectRepository::new(&ctx.env, &cfg.do_binding),
         "Repo init failed",
         500
     );
-    // Use list_projects
     respond!(json, repo.list_projects().await, "Get configs failed")
 }
 
@@ -184,20 +184,16 @@ async fn create_project(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
     if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
         return Ok(res);
     }
-
     let req_data: CreateProjectRequest =
         unwrap_or_resp!(req.json().await, "Invalid request body", 400);
-
     let repo = unwrap_or_resp!(
-        KvProjectRepository::new(&ctx.env, &cfg.kv_binding),
+        DoProjectRepository::new(&ctx.env, &cfg.do_binding),
         "Repo init failed",
         500
     );
 
-    // Construct config here (Controller Logic) and save
     let config = ProjectConfig::new(req_data);
     let result = repo.save_project(&config).await.map(|_| config);
-
     respond!(json, result, "Add config failed")
 }
 
@@ -206,15 +202,13 @@ async fn delete_project(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
     if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
         return Ok(res);
     }
-
     let target: DeleteTarget = unwrap_or_resp!(req.json().await, "Invalid request body", 400);
     let repo = unwrap_or_resp!(
-        KvProjectRepository::new(&ctx.env, &cfg.kv_binding),
+        DoProjectRepository::new(&ctx.env, &cfg.do_binding),
         "Repo init failed",
         500
     );
 
-    // Use delete_project
     respond!(
         empty,
         repo.delete_project(&target.id).await,
@@ -227,15 +221,13 @@ async fn pop_project(mut req: Request, ctx: RouteContext<()>) -> Result<Response
     if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
         return Ok(res);
     }
-
     let target: DeleteTarget = unwrap_or_resp!(req.json().await, "Invalid request body", 400);
     let repo = unwrap_or_resp!(
-        KvProjectRepository::new(&ctx.env, &cfg.kv_binding),
+        DoProjectRepository::new(&ctx.env, &cfg.do_binding),
         "Repo init failed",
         500
     );
 
-    // Pop logic moved to Controller: get -> delete
     let result: Result<Option<ProjectConfig>> = async {
         let current = repo.get_project(&target.id).await?;
         if let Some(c) = &current {
@@ -253,10 +245,9 @@ async fn toggle_pause_project(mut req: Request, ctx: RouteContext<()>) -> Result
     if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
         return Ok(res);
     }
-
     let target: DeleteTarget = unwrap_or_resp!(req.json().await, "Invalid request body", 400);
     let repo = unwrap_or_resp!(
-        KvProjectRepository::new(&ctx.env, &cfg.kv_binding),
+        DoProjectRepository::new(&ctx.env, &cfg.do_binding),
         "Repo init failed",
         500
     );
@@ -267,6 +258,10 @@ async fn toggle_pause_project(mut req: Request, ctx: RouteContext<()>) -> Result
         "Toggle pause failed"
     )
 }
+
+// =========================================================
+// Entry Points
+// =========================================================
 
 #[event(fetch)]
 pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
@@ -279,11 +274,11 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
             Method::Post,
             Method::Delete,
             Method::Options,
+            Method::Patch,
         ])
         .with_allowed_headers(vec!["Content-Type", HEADER_AUTH_KEY]);
 
     let router = Router::new();
-
     router
         .get_async("/api/projects", list_projects)
         .post_async("/api/projects", create_project)
@@ -303,12 +298,11 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 #[event(scheduled)]
 pub async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     console_error_panic_hook::set_once();
-
     let config = RuntimeConfig::new(&env);
     let client = WorkerHttpClient;
     let secret_resolver = EnvSecretResolver(&env);
 
-    let repo = match KvProjectRepository::new(&env, &config.kv_binding) {
+    let repo = match DoProjectRepository::new(&env, &config.do_binding) {
         Ok(r) => r,
         Err(e) => {
             log_error!("Repo Init Error: {}", e);
