@@ -284,7 +284,7 @@ fn ProjectsTable(
                             />
                         </tbody>
                     </table>
-                    </div>
+                </div>
             </div>
         </div>
     }

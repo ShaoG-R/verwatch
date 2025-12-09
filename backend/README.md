@@ -219,7 +219,22 @@ curl -X DELETE https://verwatch.your-subdomain.workers.dev/api/projects/pop \
   }'
 ```
 
-### 4. 手动触发检查 (调试用)
+### 4. 暂停/恢复监控 (POST)
+切换项目的暂停状态。暂停后，定时任务将跳过对该项目的检查。
+
+- **Endpoint**: `POST /api/projects/toggle_pause`
+- **Response**: `200 OK` (Body: `true` 表示已暂停, `false` 表示运行中)
+
+```bash
+curl -X POST https://verwatch.your-subdomain.workers.dev/api/projects/toggle_pause \
+  -H "X-Auth-Key: my_super_secure_password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "fail2ban/fail2ban->my-github-user/my-forked-repo"
+  }'
+```
+
+### 5. 手动触发检查 (调试用)
 
 由于 Cloudflare Worker 的 Cron 触发器在开发环境较难测试，您可以等待定时任务执行，或者在本地使用 `wrangler dev --test-scheduled` 进行模拟。
 
