@@ -131,8 +131,8 @@ pub fn DashboardPage() -> impl IntoView {
     let backend_url = Signal::derive(move || auth_state.get().backend_url);
 
     view! {
-        <div class="min-h-screen bg-base-200 p-4 md:p-8 font-sans">
-            <div class="max-w-7xl mx-auto space-y-8">
+        <div class="h-screen bg-base-200 p-4 md:p-8 font-sans flex flex-col overflow-hidden">
+            <div class="max-w-7xl mx-auto w-full flex-1 flex flex-col gap-8 min-h-0">
                 <NotificationToast notification=notification />
 
                 <DashboardNavbar
@@ -236,9 +236,9 @@ fn ProjectsTable(
     let total_monitors = move || projects.with(|p| p.len());
 
     view! {
-        <div class="card bg-base-100 shadow-xl">
-            <div class="card-body p-0">
-                <div class="flex items-center justify-between p-6 pb-2">
+        <div class="card bg-base-100 shadow-xl flex-1 flex flex-col min-h-0">
+            <div class="card-body p-0 flex flex-col h-full overflow-hidden">
+                <div class="flex items-center justify-between p-6 pb-2 flex-none">
                     <div>
                         <h3 class="card-title">"活跃监控"</h3>
                         <p class="text-base-content/70 text-sm">"管理您的仓库监控列表。目前共有 " {total_monitors} " 个监控项。"</p>
@@ -248,7 +248,7 @@ fn ProjectsTable(
                     </button>
                 </div>
 
-                <div class="overflow-x-auto w-full">
+                <div class="overflow-auto w-full flex-1">
                     <table class="table table-zebra w-full">
                         <thead>
                             <tr>
