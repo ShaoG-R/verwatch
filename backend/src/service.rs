@@ -145,6 +145,12 @@ impl<'a, C: HttpClient, R: Repository, S: SecretResolver> WatchdogService<'a, C,
 
         let results = stream::iter(configs)
             .map(|config| async move {
+                if config.paused {
+                    return format!(
+                        "Skipped {}/{} (Paused)",
+                        config.base.upstream_owner, config.base.upstream_repo
+                    );
+                }
                 match self.check_project(&config).await {
                     Ok(msg) => msg,
                     Err(e) => format!("Error checking {}: {}", config.base.upstream_repo, e),

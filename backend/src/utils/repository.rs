@@ -8,6 +8,7 @@ pub trait Repository {
     async fn get_project(&self, id: &str) -> Result<Option<ProjectConfig>>;
     async fn save_project(&self, config: &ProjectConfig) -> Result<()>;
     async fn delete_project(&self, id: &str) -> Result<()>;
+    async fn toggle_pause_project(&self, id: &str) -> Result<bool>;
 
     // State Management (Versioning)
     async fn get_version_state(&self, key: &str) -> Result<Option<String>>;
@@ -98,6 +99,16 @@ impl Repository for KvProjectRepository {
         Ok(())
     }
 
+    async fn toggle_pause_project(&self, id: &str) -> Result<bool> {
+        let mut config = self
+            .get_project(id)
+            .await?
+            .ok_or_else(|| Error::from("Project not found"))?;
+        config.paused = !config.paused;
+        self.save_project(&config).await?;
+        Ok(config.paused)
+    }
+
     async fn get_version_state(&self, key: &str) -> Result<Option<String>> {
         Ok(self.kv.get(key).text().await?)
     }
@@ -154,6 +165,16 @@ pub mod tests {
         async fn delete_project(&self, id: &str) -> Result<()> {
             self.configs.borrow_mut().retain(|c| c.unique_key != id);
             Ok(())
+        }
+
+        async fn toggle_pause_project(&self, id: &str) -> Result<bool> {
+            let mut configs = self.configs.borrow_mut();
+            if let Some(c) = configs.iter_mut().find(|c| c.unique_key == id) {
+                c.paused = !c.paused;
+                Ok(c.paused)
+            } else {
+                Err(Error::from("Not Found"))
+            }
         }
 
         async fn get_version_state(&self, key: &str) -> Result<Option<String>> {

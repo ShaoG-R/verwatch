@@ -42,6 +42,7 @@ pub struct CreateProjectRequest {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProjectConfig {
     pub unique_key: String,
+    pub paused: bool,
     #[serde(flatten)]
     pub base: CreateProjectRequest,
 }
@@ -50,6 +51,7 @@ impl ProjectConfig {
     pub fn new(base: CreateProjectRequest) -> Self {
         let mut config = ProjectConfig {
             unique_key: String::new(),
+            paused: false,
             base,
         };
         config.unique_key = config.generate_unique_key();

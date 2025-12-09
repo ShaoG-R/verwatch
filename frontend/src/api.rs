@@ -105,4 +105,23 @@ impl VerWatchApi {
             .await
             .map_err(|e| e.to_string())
     }
+    
+    pub async fn toggle_pause_project(&self, id: String) -> Result<bool, String> {
+        let url = self.url("/api/projects/toggle_pause");
+        let target = DeleteTarget { id };
+        let res = Request::post(&url)
+            .header(self.auth_header().0, self.auth_header().1)
+            .header("Content-Type", "application/json")
+            .json(&target)
+            .map_err(|e| e.to_string())?
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !res.ok() {
+            return Err(format!("切换暂停状态失败: {}", res.status()));
+        }
+
+        res.json::<bool>().await.map_err(|e| e.to_string())
+    }
 }

@@ -248,6 +248,26 @@ async fn pop_project(mut req: Request, ctx: RouteContext<()>) -> Result<Response
     respond!(json, result, "Pop config failed")
 }
 
+async fn toggle_pause_project(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let cfg = RuntimeConfig::new(&ctx.env);
+    if let Err(res) = ensure_admin_auth(&req, &ctx.env, &cfg) {
+        return Ok(res);
+    }
+
+    let target: DeleteTarget = unwrap_or_resp!(req.json().await, "Invalid request body", 400);
+    let repo = unwrap_or_resp!(
+        KvProjectRepository::new(&ctx.env, &cfg.kv_binding),
+        "Repo init failed",
+        500
+    );
+
+    respond!(
+        json,
+        repo.toggle_pause_project(&target.id).await,
+        "Toggle pause failed"
+    )
+}
+
 #[event(fetch)]
 pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     console_error_panic_hook::set_once();
@@ -269,8 +289,12 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .post_async("/api/projects", create_project)
         .delete_async("/api/projects", delete_project)
         .delete_async("/api/projects/pop", pop_project)
+        .post_async("/api/projects/toggle_pause", toggle_pause_project)
         .options_async("/api/projects", |_, _| async { Response::empty() })
         .options_async("/api/projects/pop", |_, _| async { Response::empty() })
+        .options_async("/api/projects/toggle_pause", |_, _| async {
+            Response::empty()
+        })
         .run(req, env)
         .await?
         .with_cors(&cors)
