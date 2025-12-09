@@ -24,6 +24,10 @@ ADMIN_SECRET_NAME = "ADMIN_SECRET"
 GITHUB_TOKEN_NAME = "GITHUB_TOKEN"
 PAT_TOKEN_NAME = "MY_GITHUB_PAT"
 
+[[migrations]]
+tag = "v1" # 这是第一次部署，标记为 v1
+new_classes = ["ProjectStore"] # 声明 ProjectStore 是一个新引入的类
+
 # 定时任务配置
 [triggers]
 crons = ["0 * * * *"]
