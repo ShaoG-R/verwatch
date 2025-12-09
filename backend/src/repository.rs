@@ -1,7 +1,9 @@
 mod durable_object;
+pub mod protocol;
 
+use protocol::*;
 use verwatch_shared::ProjectConfig;
-use worker::*;
+use worker::{wasm_bindgen::JsValue, *};
 
 // 定义仓库 Trait
 #[async_trait::async_trait(?Send)]
@@ -34,85 +36,79 @@ impl DoProjectRepository {
         Ok(Self { stub })
     }
 
-    fn make_request_init(
-        method: Method,
-        body: Option<wasm_bindgen::JsValue>,
-    ) -> Result<RequestInit> {
+    // 核心泛型方法：输入 T，必定返回 Result<T::Response>
+    async fn execute<T: ApiRequest>(&self, req: T) -> Result<T::Response> {
+        // 序列化请求体
+        let body = serde_json::to_string(&req)?;
+
+        // 构造 Request
         let headers = Headers::new();
         headers.set("Content-Type", "application/json")?;
-        headers.set("Accept", "application/json")?;
 
         let mut init = RequestInit::new();
-        init.with_method(method)
+        init.with_method(T::METHOD)
             .with_headers(headers)
-            .with_body(body);
+            .with_body(Some(JsValue::from_str(&body)));
 
-        Ok(init)
+        // 使用协议中定义的常量路径
+        let url = format!("http://do{}", T::PATH);
+        let request = Request::new_with_init(&url, &init)?;
+
+        // 发送并处理响应
+        let mut response = self.stub.fetch_with_request(request).await?;
+
+        if response.status_code() != 200 {
+            return Err(Error::from(format!("DO Error: {}", response.status_code())));
+        }
+
+        // 泛型反序列化：这里编译器保证了 json() 解析出的类型就是 T::Response
+        response.json::<T::Response>().await
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl Repository for DoProjectRepository {
     async fn list_projects(&self) -> Result<Vec<ProjectConfig>> {
-        let mut resp = self.stub.fetch_with_str("http://do/projects").await?;
-        resp.json().await
+        // 编译器知道返回的是 Vec<ProjectConfig>
+        self.execute(ListProjectsCmd { prefix: None }).await
     }
 
     async fn list_projects_with_states(&self) -> Result<Vec<(ProjectConfig, Option<String>)>> {
-        let mut resp = self
-            .stub
-            .fetch_with_str("http://do/projects/with_states")
-            .await?;
-        resp.json().await
+        self.execute(ListProjectsWithStatesCmd).await
     }
 
     async fn get_project(&self, id: &str) -> Result<Option<ProjectConfig>> {
-        let path = format!("http://do/projects/{}", id);
-        let mut resp = self.stub.fetch_with_str(&path).await?;
-        resp.json().await
+        self.execute(GetProjectCmd { id: id.to_string() }).await
     }
 
     async fn save_project(&self, config: &ProjectConfig) -> Result<()> {
-        let body = wasm_bindgen::JsValue::from_str(&serde_json::to_string(config)?);
-        let init = Self::make_request_init(Method::Post, Some(body))?;
-        let req = Request::new_with_init("http://do/projects", &init)?;
-        self.stub.fetch_with_request(req).await?;
-        Ok(())
+        self.execute(SaveProjectCmd {
+            config: config.clone(),
+        })
+        .await
     }
 
     async fn delete_project(&self, id: &str) -> Result<()> {
-        let path = format!("http://do/projects/{}", id);
-        let req = Request::new(&path, Method::Delete)?;
-        self.stub.fetch_with_request(req).await?;
-        Ok(())
+        self.execute(DeleteProjectCmd { id: id.to_string() }).await
     }
 
     async fn toggle_pause_project(&self, id: &str) -> Result<bool> {
-        // 调用 DO 端的 PATCH 接口实现原子操作
-        let path = format!("http://do/projects/{}/toggle", id);
-        let init = Self::make_request_init(Method::Patch, None)?;
-        let req = Request::new_with_init(&path, &init)?;
-
-        let mut resp = self.stub.fetch_with_request(req).await?;
-        if resp.status_code() == 404 {
-            return Err(Error::from("Project not found"));
-        }
-        resp.json().await
+        self.execute(TogglePauseCmd { id: id.to_string() }).await
     }
 
     async fn get_version_state(&self, key: &str) -> Result<Option<String>> {
-        let path = format!("http://do/state/{}", key);
-        let mut resp = self.stub.fetch_with_str(&path).await?;
-        resp.json().await
+        self.execute(GetVersionStateCmd {
+            key: key.to_string(),
+        })
+        .await
     }
 
     async fn set_version_state(&self, key: &str, value: &str) -> Result<()> {
-        let path = format!("http://do/state/{}", key);
-        let body = wasm_bindgen::JsValue::from_str(value);
-        let init = Self::make_request_init(Method::Post, Some(body))?;
-        let req = Request::new_with_init(&path, &init)?;
-        self.stub.fetch_with_request(req).await?;
-        Ok(())
+        self.execute(SetVersionStateCmd {
+            key: key.to_string(),
+            value: value.to_string(),
+        })
+        .await
     }
 }
 
