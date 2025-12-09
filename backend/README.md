@@ -29,7 +29,7 @@
 ### 1. 克隆项目
 
 ```bash
-git clone [https://github.com/your-username/verwatch.git](https://github.com/your-username/verwatch.git)
+git clone https://github.com/your-username/verwatch.git
 cd verwatch
 ```
 
