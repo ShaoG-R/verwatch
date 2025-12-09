@@ -72,7 +72,7 @@ trunk build --release
 
 ## 样式说明
 
-本项目为了简化开发流程，直接在 `index.html` 中通过 CDN 引入了 **TailwindCSS v4** (Alpha) 和 **DaisyUI v5** (Beta)。
+本项目为了简化开发流程，直接在 `index.html` 中通过 CDN 引入了 **TailwindCSS v4** 和 **DaisyUI v5**。
 *   无需配置 `npm install` 或 `postcss`。
 *   **注意**:这也意味着开发和运行时客户端需要能够访问 `cdn.jsdelivr.net` 和 `unpkg.com`。
 
