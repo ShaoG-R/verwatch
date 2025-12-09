@@ -11,7 +11,7 @@ pub fn LoginPage() -> impl IntoView {
     let AuthContext(auth_state, set_auth) = use_auth();
     let navigate = use_navigate();
 
-    let (url, set_url) = signal(String::new());
+    let (url, set_url) = signal(auth_state.get().backend_url);
     let (secret, set_secret) = signal(String::new());
     let (is_submitting, set_is_submitting) = signal(false);
     let (error_msg, set_error_msg) = signal(Option::<String>::None);
