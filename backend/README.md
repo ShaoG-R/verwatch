@@ -65,6 +65,10 @@ PAT_TOKEN_NAME = "MY_GITHUB_PAT"
 [triggers]
 crons = ["0 * * * *"]
 
+[[migrations]]
+tag = "v1" # 这是第一次部署，标记为 v1
+new_sqlite_classes = ["ProjectStore"] # 声明 ProjectStore 是一个新引入的类
+
 [build]
 command = "cargo install -q worker-build && worker-build --release"
 ```
