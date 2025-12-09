@@ -1,13 +1,14 @@
 use worker::*;
 
-pub mod api;
 pub mod repository;
-pub mod request;
 pub mod service;
+pub(crate) mod utils {
+    pub mod request;
+}
 
 use repository::{KvProjectRepository, Repository};
-use request::WorkerHttpClient;
 use service::{EnvSecretResolver, WatchdogService};
+use utils::request::WorkerHttpClient;
 
 // =========================================================
 // 常量定义 (Constants)

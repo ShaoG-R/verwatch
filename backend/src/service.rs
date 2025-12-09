@@ -1,11 +1,13 @@
+mod github_gateway;
+
 use futures::{StreamExt, stream};
 use serde::{Deserialize, Serialize};
 use verwatch_shared::{ComparisonMode, ProjectConfig};
 use worker::*;
 
-use crate::api::GitHubGateway;
 use crate::repository::Repository;
-use crate::request::HttpClient;
+use crate::service::github_gateway::GitHubGateway;
+use crate::utils::request::HttpClient;
 
 // =========================================================
 // 跨平台日志宏 (Copied for local usage)
@@ -187,7 +189,7 @@ impl<'a, C: HttpClient, R: Repository, S: SecretResolver> WatchdogService<'a, C,
 mod tests {
     use super::*;
     use crate::repository::tests::MockRepository;
-    use crate::request::MockHttpClient;
+    use crate::utils::request::MockHttpClient;
     use serde_json::json;
     use std::collections::HashMap;
     use verwatch_shared::CreateProjectRequest;
