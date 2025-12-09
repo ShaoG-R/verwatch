@@ -4,43 +4,25 @@ use futures::{StreamExt, stream};
 use verwatch_shared::ProjectConfig;
 use worker::*;
 
+use crate::error::Result; // 使用自定义 Result
 use crate::repository::Repository;
 use crate::utils::request::HttpClient;
 use github_gateway::GitHubGateway;
 
-// =========================================================
-// 跨平台日志宏 (Copied for local usage)
-// =========================================================
-
+// ... (日志宏保持不变, 省略以节省空间) ...
 #[cfg(target_arch = "wasm32")]
-macro_rules! log_info {
-    ($($t:tt)*) => (worker::console_log!($($t)*))
-}
-
+macro_rules! log_info { ($($t:tt)*) => (worker::console_log!($($t)*)) }
 #[cfg(not(target_arch = "wasm32"))]
-macro_rules! log_info {
-    ($($t:tt)*) => (println!($($t)*))
-}
-
+macro_rules! log_info { ($($t:tt)*) => (println!($($t)*)) }
 #[cfg(target_arch = "wasm32")]
-macro_rules! log_error {
-    ($($t:tt)*) => (worker::console_error!($($t)*))
-}
-
+macro_rules! log_error { ($($t:tt)*) => (worker::console_error!($($t)*)) }
 #[cfg(not(target_arch = "wasm32"))]
-macro_rules! log_error {
-    ($($t:tt)*) => (eprintln!($($t)*))
-}
-
-// =========================================================
-// 抽象接口：SecretResolver
-// =========================================================
+macro_rules! log_error { ($($t:tt)*) => (eprintln!($($t)*)) }
 
 pub trait SecretResolver {
     fn get_secret(&self, name: &str) -> Option<String>;
 }
 
-// 实现：生产环境使用 Env 获取 Secret
 pub struct EnvSecretResolver<'a>(pub &'a Env);
 
 impl<'a> SecretResolver for EnvSecretResolver<'a> {
@@ -48,10 +30,6 @@ impl<'a> SecretResolver for EnvSecretResolver<'a> {
         self.0.secret(name).ok().map(|s| s.to_string())
     }
 }
-
-// =========================================================
-// 业务服务层
-// =========================================================
 
 pub struct WatchdogService<'a, C: HttpClient, R: Repository, S: SecretResolver> {
     repo: R,
@@ -76,16 +54,19 @@ impl<'a, C: HttpClient, R: Repository, S: SecretResolver> WatchdogService<'a, C,
         }
     }
 
-    // 重构：check_project 现在接收预先获取的 state
+    // 内部方法
     async fn check_project(
         &self,
         config: &ProjectConfig,
         current_state: Option<String>,
     ) -> Result<String> {
+        // gateway 仍可能返回 worker::Result 或其他，这里假设我们需要处理错误转换
+        // 如果 GitHubGateway 仍使用 worker::Result，我们需要 map_err
         let release = self
             .gateway
             .fetch_latest_release(&config.base.upstream_owner, &config.base.upstream_repo)
-            .await?;
+            .await
+            .map_err(|e| crate::error::AppError::Store(format!("GitHub API Error: {}", e)))?;
 
         let remote_time = match release.get_comparison_timestamp(config.base.comparison_mode) {
             Some(t) => t,
@@ -97,7 +78,6 @@ impl<'a, C: HttpClient, R: Repository, S: SecretResolver> WatchdogService<'a, C,
             }
         };
 
-        // Optimization: 使用传入的 state，避免了 N+1 的 Fetch
         if let Some(local) = current_state {
             if local.as_str() == remote_time {
                 return Ok(format!(
@@ -112,7 +92,7 @@ impl<'a, C: HttpClient, R: Repository, S: SecretResolver> WatchdogService<'a, C,
                 Some(t) => t,
                 None => {
                     log_error!(
-                        "Secret '{}' not found in Env/Vars, falling back to global token.",
+                        "Secret '{}' not found, falling back to global token.",
                         secret_name
                     );
                     self.global_dispatch_token.clone()
@@ -124,9 +104,9 @@ impl<'a, C: HttpClient, R: Repository, S: SecretResolver> WatchdogService<'a, C,
 
         self.gateway
             .trigger_dispatch(config, &release.tag_name, &token)
-            .await?;
+            .await
+            .map_err(|e| crate::error::AppError::Store(format!("Dispatch Error: {}", e)))?;
 
-        // 只有在更新发生时才调用 repo 写入，写入依然是单个请求，但这是低频操作
         self.repo
             .set_version_state(&config.version_store_key(), remote_time)
             .await?;
@@ -138,7 +118,6 @@ impl<'a, C: HttpClient, R: Repository, S: SecretResolver> WatchdogService<'a, C,
     }
 
     pub async fn run_all(&self) -> Result<String> {
-        // Optimization: 使用 Bulk Get 获取配置+状态
         let items = self.repo.list_projects_with_states().await?;
         if items.is_empty() {
             return Ok("No projects configured.".to_string());
@@ -146,7 +125,6 @@ impl<'a, C: HttpClient, R: Repository, S: SecretResolver> WatchdogService<'a, C,
 
         const CONCURRENCY_LIMIT: usize = 5;
 
-        // items 是 (ProjectConfig, Option<String>) 的元组列表
         let results = stream::iter(items)
             .map(|(config, state)| async move {
                 if config.paused {

@@ -69,8 +69,13 @@ pub fn DashboardPage() -> impl IntoView {
             let api = api.clone();
             spawn_local(async move {
                 match api.delete_project(id.clone()).await {
-                    Ok(_) => {
-                        set_notification.set(Some(("监控已删除".to_string(), false)));
+                    Ok(deleted) => {
+                        let msg = if deleted {
+                            "监控已删除"
+                        } else {
+                            "监控不存在 (已清理)"
+                        };
+                        set_notification.set(Some((msg.to_string(), false)));
                         set_projects.update(|list| list.retain(|p| p.unique_key != id));
                     }
                     Err(e) => set_notification.set(Some((format!("删除监控失败: {}", e), true))),

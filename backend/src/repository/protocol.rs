@@ -58,7 +58,7 @@ pub struct DeleteProjectCmd {
     pub id: String,
 }
 impl ApiRequest for DeleteProjectCmd {
-    type Response = ();
+    type Response = bool;
     const PATH: &'static str = "/rpc/projects/delete";
 }
 

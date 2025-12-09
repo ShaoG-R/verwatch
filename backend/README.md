@@ -179,7 +179,9 @@ curl https://verwatch.your-subdomain.workers.dev/api/projects \
 仅执行删除操作，不返回旧数据。响应快，语义标准。
 
 - **Endpoint**: `DELETE /api/projects`
-- **Response**: `204 No Content`
+- **Response**: 
+  - `204 No Content` (成功删除)
+  - `404 Not Found` (资源不存在)
 
 ```bash
 curl -X DELETE https://verwatch.your-subdomain.workers.dev/api/projects \

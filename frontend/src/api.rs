@@ -64,7 +64,7 @@ impl VerWatchApi {
     }
 
     /// 删除项目
-    pub async fn delete_project(&self, id: String) -> Result<(), String> {
+    pub async fn delete_project(&self, id: String) -> Result<bool, String> {
         let url = self.url("/api/projects");
         let target = DeleteTarget { id };
         let res = Request::delete(&url)
@@ -76,11 +76,11 @@ impl VerWatchApi {
             .await
             .map_err(|e| e.to_string())?;
 
-        if !res.ok() {
-            return Err(format!("删除项目失败: {}", res.status()));
+        match res.status() {
+            204 => Ok(true),
+            404 => Ok(false),
+            _ => Err(format!("删除项目失败: {}", res.status())),
         }
-
-        Ok(())
     }
 
     // 弹出项目（删除并返回）
@@ -105,7 +105,7 @@ impl VerWatchApi {
             .await
             .map_err(|e| e.to_string())
     }
-    
+
     pub async fn toggle_pause_project(&self, id: String) -> Result<bool, String> {
         let url = self.url("/api/projects/toggle_pause");
         let target = DeleteTarget { id };
