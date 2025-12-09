@@ -1,5 +1,6 @@
+use crate::ProjectConfig; // 引用 lib.rs 中的模型
 use crate::request::{HttpClient, HttpMethod, HttpRequest};
-use crate::{GitHubRelease, ProjectConfig}; // 引用 lib.rs 中的模型
+use crate::service::GitHubRelease;
 use serde::Serialize;
 use serde_json::json;
 use worker::{Error, Result};
