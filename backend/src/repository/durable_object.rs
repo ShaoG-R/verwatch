@@ -25,18 +25,17 @@ impl<S: StorageAdapter> ProjectStoreLogic<S> {
     pub async fn list_projects(&self, cmd: ListProjectsCmd) -> Result<Vec<ProjectConfig>> {
         let prefix = cmd.prefix.as_deref().unwrap_or(PREFIX_PROJECT);
         let map = self.storage.list_map::<ProjectConfig>(prefix).await?;
+        let configs: Vec<ProjectConfig> = map.into_values().collect::<Result<_>>()?;
 
-        // map.values() 返回 &ProjectConfig，我们需要 clone 出来返回
-        Ok(map.values().cloned().collect())
+        Ok(configs)
     }
 
     pub async fn list_projects_with_states(&self) -> Result<Vec<(ProjectConfig, Option<String>)>> {
-        // 1. 获取所有 Config
         let map = self
             .storage
             .list_map::<ProjectConfig>(PREFIX_PROJECT)
             .await?;
-        let configs: Vec<ProjectConfig> = map.values().cloned().collect();
+        let configs: Vec<ProjectConfig> = map.into_values().collect::<Result<_>>()?;
 
         // 2. 聚合获取所有 State (并发 N+1)
         // 这里的闭包捕获 &self.storage。
