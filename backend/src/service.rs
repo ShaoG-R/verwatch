@@ -1,8 +1,7 @@
 mod github_gateway;
 
 use futures::{StreamExt, stream};
-use serde::{Deserialize, Serialize};
-use verwatch_shared::{ComparisonMode, ProjectConfig};
+use verwatch_shared::ProjectConfig;
 use worker::*;
 
 use crate::repository::Repository;
@@ -47,26 +46,6 @@ pub struct EnvSecretResolver<'a>(pub &'a Env);
 impl<'a> SecretResolver for EnvSecretResolver<'a> {
     fn get_secret(&self, name: &str) -> Option<String> {
         self.0.secret(name).ok().map(|s| s.to_string())
-    }
-}
-
-// =========================================================
-// 领域模型
-// =========================================================
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct GitHubRelease {
-    pub tag_name: String,
-    pub published_at: Option<String>,
-    pub updated_at: Option<String>,
-}
-
-impl GitHubRelease {
-    pub fn get_comparison_timestamp(&self, mode: ComparisonMode) -> Option<&String> {
-        match mode {
-            ComparisonMode::PublishedAt => self.published_at.as_ref(),
-            ComparisonMode::UpdatedAt => self.updated_at.as_ref(),
-        }
     }
 }
 
@@ -192,7 +171,7 @@ mod tests {
     use crate::utils::request::MockHttpClient;
     use serde_json::json;
     use std::collections::HashMap;
-    use verwatch_shared::CreateProjectRequest;
+    use verwatch_shared::{ComparisonMode, CreateProjectRequest};
 
     pub struct MockSecretResolver {
         pub secrets: HashMap<String, String>,

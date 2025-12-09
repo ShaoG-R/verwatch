@@ -1,8 +1,8 @@
 use crate::ProjectConfig; // 引用 lib.rs 中的模型
-use crate::service::GitHubRelease;
 use crate::utils::request::{HttpClient, HttpMethod, HttpRequest};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use verwatch_shared::ComparisonMode;
 use worker::{Error, Result};
 
 pub const GITHUB_API_VERSION: &str = "2022-11-28";
@@ -49,6 +49,26 @@ impl<'a> DispatchEvent<'a> {
             )));
         }
         Ok(())
+    }
+}
+
+// =========================================================
+// 领域模型
+// =========================================================
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct GitHubRelease {
+    pub tag_name: String,
+    pub published_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl GitHubRelease {
+    pub fn get_comparison_timestamp(&self, mode: ComparisonMode) -> Option<&String> {
+        match mode {
+            ComparisonMode::PublishedAt => self.published_at.as_ref(),
+            ComparisonMode::UpdatedAt => self.updated_at.as_ref(),
+        }
     }
 }
 
