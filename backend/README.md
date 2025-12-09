@@ -29,7 +29,7 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/your-username/verwatch.git
+git clone https://github.com/ShaoG-R/verwatch.git
 cd verwatch
 ```
 
@@ -43,6 +43,7 @@ wrangler kv namespace create VERSION_STORE
 
 执行后，终端会输出类似以下内容，请记录下 `id`：
 
+
 ```toml
 [kv_namespaces]
 binding = "VERSION_STORE"
@@ -51,7 +52,7 @@ id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 ### 3. 配置 `wrangler.toml`
 
-在项目根目录修改 `wrangler.toml` 文件。请将上一步获得的 KV ID 填入：
+在项目backend目录修改 `wrangler.toml` 文件。请将上一步获得的 KV ID 填入：
 
 ```toml
 name = "verwatch"
@@ -142,7 +143,8 @@ jobs:
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          wranglerVersion: "4"
+          wranglerVersion: "4.53.0"
+          workingDirectory: "backend"
 ```
 
 ---
@@ -157,7 +159,7 @@ jobs:
 **Header**: `X-Auth-Key: <您设置的 ADMIN_SECRET>`
 
 ```bash
-curl -X POST [https://verwatch.your-subdomain.workers.dev/api/projects](https://verwatch.your-subdomain.workers.dev/api/projects) \
+curl -X POST https://verwatch.your-subdomain.workers.dev/api/projects \
   -H "X-Auth-Key: my_super_secure_password" \
   -H "Content-Type: application/json" \
   -d '{
@@ -179,7 +181,7 @@ curl -X POST [https://verwatch.your-subdomain.workers.dev/api/projects](https://
 ### 2. 查看监控列表 (GET)
 
 ```bash
-curl [https://verwatch.your-subdomain.workers.dev/api/projects](https://verwatch.your-subdomain.workers.dev/api/projects) \
+curl https://verwatch.your-subdomain.workers.dev/api/projects \
   -H "X-Auth-Key: my_super_secure_password"
 ```
 
@@ -194,7 +196,7 @@ curl [https://verwatch.your-subdomain.workers.dev/api/projects](https://verwatch
 - **Response**: `204 No Content`
 
 ```bash
-curl -X DELETE [https://verwatch.your-subdomain.workers.dev/api/projects](https://verwatch.your-subdomain.workers.dev/api/projects) \
+curl -X DELETE https://verwatch.your-subdomain.workers.dev/api/projects \
   -H "X-Auth-Key: my_super_secure_password" \
   -H "Content-Type: application/json" \
   -d '{
@@ -209,7 +211,7 @@ curl -X DELETE [https://verwatch.your-subdomain.workers.dev/api/projects](https:
 - **Response**: `200 OK` (Body: 被删除的 Config JSON)
 
 ```bash
-curl -X DELETE [https://verwatch.your-subdomain.workers.dev/api/projects/pop](https://verwatch.your-subdomain.workers.dev/api/projects/pop) \
+curl -X DELETE https://verwatch.your-subdomain.workers.dev/api/projects/pop \
   -H "X-Auth-Key: my_super_secure_password" \
   -H "Content-Type: application/json" \
   -d '{
