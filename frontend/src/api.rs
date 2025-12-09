@@ -21,10 +21,12 @@ impl VerWatchApi {
         }
     }
 
+    // 认证头
     fn auth_header(&self) -> (&str, &str) {
         ("X-Auth-Key", &self.secret)
     }
 
+    /// 获取项目列表
     pub async fn get_projects(&self) -> Result<Vec<ProjectConfig>, String> {
         let url = self.url("/api/projects");
         let res = Request::get(&url)
@@ -34,7 +36,7 @@ impl VerWatchApi {
             .map_err(|e| e.to_string())?;
 
         if !res.ok() {
-            return Err(format!("Failed to fetch projects: {}", res.status()));
+            return Err(format!("获取项目失败: {}", res.status()));
         }
 
         res.json::<Vec<ProjectConfig>>()
@@ -42,6 +44,7 @@ impl VerWatchApi {
             .map_err(|e| e.to_string())
     }
 
+    /// 添加项目
     pub async fn add_project(&self, config: CreateProjectRequest) -> Result<ProjectConfig, String> {
         let url = self.url("/api/projects");
         let res = Request::post(&url)
@@ -54,12 +57,13 @@ impl VerWatchApi {
             .map_err(|e| e.to_string())?;
 
         if !res.ok() {
-            return Err(format!("Failed to add project: {}", res.status()));
+            return Err(format!("添加项目失败: {}", res.status()));
         }
 
         res.json::<ProjectConfig>().await.map_err(|e| e.to_string())
     }
 
+    /// 删除项目
     pub async fn delete_project(&self, id: String) -> Result<(), String> {
         let url = self.url("/api/projects");
         let target = DeleteTarget { id };
@@ -73,12 +77,13 @@ impl VerWatchApi {
             .map_err(|e| e.to_string())?;
 
         if !res.ok() {
-            return Err(format!("Failed to delete project: {}", res.status()));
+            return Err(format!("删除项目失败: {}", res.status()));
         }
 
         Ok(())
     }
 
+    // 弹出项目（删除并返回）
     #[allow(dead_code)]
     pub async fn pop_project(&self, id: String) -> Result<Option<ProjectConfig>, String> {
         let url = self.url("/api/projects/pop");
@@ -93,7 +98,7 @@ impl VerWatchApi {
             .map_err(|e| e.to_string())?;
 
         if !res.ok() {
-            return Err(format!("Failed to pop project: {}", res.status()));
+            return Err(format!("弹出项目失败: {}", res.status()));
         }
 
         res.json::<Option<ProjectConfig>>()

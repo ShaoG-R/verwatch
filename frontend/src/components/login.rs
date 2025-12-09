@@ -16,7 +16,7 @@ pub fn LoginPage() -> impl IntoView {
     let (is_submitting, set_is_submitting) = signal(false);
     let (error_msg, set_error_msg) = signal(Option::<String>::None);
 
-    // Redirect if already authenticated
+    // 如果已认证则重定向
     Effect::new({
         let navigate = navigate.clone();
         move |_| {
@@ -27,9 +27,9 @@ pub fn LoginPage() -> impl IntoView {
         }
     });
 
-    // Using a derived signal for loading state check to return early if needed,
-    // although in this single page app, usually we just render.
-    // The original code returned null if loading.
+    // 使用派生信号检查加载状态以在需要时提前返回
+    // 尽管在这个单页应用中，我们通常只是渲染。
+    // 原始代码在加载时返回 null。
     let is_loading = move || auth_state.get().is_loading;
 
     view! {
@@ -39,7 +39,7 @@ pub fn LoginPage() -> impl IntoView {
                 let on_submit = move |ev: leptos::web_sys::SubmitEvent| {
                     ev.prevent_default();
                     if url.get().is_empty() || secret.get().is_empty() {
-                        set_error_msg.set(Some("Please fill in all fields".to_string()));
+                        set_error_msg.set(Some("请填写所有字段".to_string()));
                         return;
                     }
 
@@ -52,7 +52,7 @@ pub fn LoginPage() -> impl IntoView {
                         if success {
                             navigate("/dashboard", Default::default());
                         } else {
-                            set_error_msg.set(Some("Connection failed. Check URL and Secret.".to_string()));
+                            set_error_msg.set(Some("连接失败。请检查 URL 和密钥。".to_string()));
                         }
                         set_is_submitting.set(false);
                     });
@@ -66,9 +66,9 @@ pub fn LoginPage() -> impl IntoView {
                                     <div class="p-3 bg-primary/10 rounded-2xl text-primary">
                                         <ShieldCheck attr:class="h-8 w-8" />
                                     </div>
-                                    <h1 class="text-3xl font-bold">"VerWatch UI"</h1>
+                                    <h1 class="text-3xl font-bold">"VerWatch 面板"</h1>
                                     <p class="text-base-content/70">
-                                        "Enter your worker credentials to continue"
+                                        "输入您的 Worker 凭证以继续"
                                     </p>
                                 </div>
                             </div>
@@ -84,7 +84,7 @@ pub fn LoginPage() -> impl IntoView {
 
                                     <div class="form-control">
                                         <label class="label" for="url">
-                                            <span class="label-text">"Backend URL"</span>
+                                            <span class="label-text">"后端 URL"</span>
                                         </label>
                                         <input
                                             id="url"
@@ -98,7 +98,7 @@ pub fn LoginPage() -> impl IntoView {
                                     </div>
                                     <div class="form-control">
                                         <label class="label" for="secret">
-                                            <span class="label-text">"Admin Secret"</span>
+                                            <span class="label-text">"管理密钥"</span>
                                         </label>
                                         <input
                                             id="secret"
@@ -113,9 +113,9 @@ pub fn LoginPage() -> impl IntoView {
                                     <div class="form-control mt-6">
                                         <button class="btn btn-primary" disabled=move || is_submitting.get()>
                                             {move || if is_submitting.get() {
-                                                view! { <span class="loading loading-spinner"></span> "Connecting..." }.into_any()
+                                                view! { <span class="loading loading-spinner"></span> "连接中..." }.into_any()
                                             } else {
-                                                "Connect to Dashboard".into_any()
+                                                "连接到控制台".into_any()
                                             }}
                                         </button>
                                     </div>

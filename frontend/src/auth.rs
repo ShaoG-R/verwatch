@@ -21,7 +21,7 @@ pub fn use_auth() -> AuthContext {
 }
 
 pub fn init_auth(set_auth: WriteSignal<AuthState>) {
-    // Try to load from local storage
+    // 尝试从本地存储加载
     if let (Ok(url), Ok(secret)) = (
         LocalStorage::get::<String>(STORAGE_URL_KEY),
         LocalStorage::get::<String>(STORAGE_SECRET_KEY),
@@ -40,6 +40,7 @@ pub fn init_auth(set_auth: WriteSignal<AuthState>) {
     }
 }
 
+/// 登录并保存状态
 pub async fn login(set_auth: WriteSignal<AuthState>, url: String, secret: String) -> bool {
     let api = VerWatchApi::new(url.clone(), secret.clone());
     if api.get_projects().await.is_ok() {
@@ -56,6 +57,7 @@ pub async fn login(set_auth: WriteSignal<AuthState>, url: String, secret: String
     }
 }
 
+/// 注销并清除状态
 pub fn logout(set_auth: WriteSignal<AuthState>) {
     let _ = LocalStorage::delete(STORAGE_URL_KEY);
     let _ = LocalStorage::delete(STORAGE_SECRET_KEY);
@@ -64,5 +66,5 @@ pub fn logout(set_auth: WriteSignal<AuthState>) {
         state.is_authenticated = false;
         state.backend_url = String::new();
     });
-    // Navigation should be handled by the component listening to auth state
+    // 导航应该由监听 Auth 状态的组件处理
 }
