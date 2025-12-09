@@ -12,9 +12,15 @@ use request::{HttpClient, WorkerHttpClient};
 // 常量定义 (Constants)
 // =========================================================
 
-const PREFIX_PROJECT: &str = "p:";
-const PREFIX_VERSION: &str = "v:";
-const HEADER_AUTH_KEY: &str = "X-Auth-Key";
+use verwatch_shared::{
+    ComparisonMode, CreateProjectRequest, DeleteTarget, HEADER_AUTH_KEY, PREFIX_PROJECT,
+    ProjectConfig,
+};
+
+// =========================================================
+// 常量定义 (Constants)
+// =========================================================
+
 const DEFAULT_KV_BINDING: &str = "VERSION_STORE";
 const DEFAULT_SECRET_VAR_NAME: &str = "ADMIN_SECRET";
 const DEFAULT_GITHUB_TOKEN_VAR_NAME: &str = "GITHUB_TOKEN";
@@ -140,70 +146,6 @@ impl RuntimeConfig {
 // 领域模型 (Domain Models)
 // =========================================================
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ComparisonMode {
-    PublishedAt,
-    UpdatedAt,
-}
-
-impl Default for ComparisonMode {
-    fn default() -> Self {
-        ComparisonMode::PublishedAt
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct BaseProjectConfig {
-    pub upstream_owner: String,
-    pub upstream_repo: String,
-    pub my_owner: String,
-    pub my_repo: String,
-
-    // Breaking Change: 存储 Secret 变量名，而不是 Token 本身
-    // 对应 wrangler.toml 中的 [secrets] 或 [vars]
-    pub dispatch_token_secret: Option<String>,
-
-    pub comparison_mode: ComparisonMode,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ProjectConfig {
-    pub unique_key: String,
-    #[serde(flatten)]
-    pub base: BaseProjectConfig,
-}
-
-pub type CreateProjectRequest = BaseProjectConfig;
-
-impl ProjectConfig {
-    pub fn new(base: BaseProjectConfig) -> Self {
-        let mut config = ProjectConfig {
-            unique_key: String::new(),
-            base,
-        };
-        config.unique_key = config.generate_unique_key();
-        config
-    }
-
-    pub fn version_store_key(&self) -> String {
-        format!(
-            "{}{}/{}",
-            PREFIX_VERSION, self.base.upstream_owner, self.base.upstream_repo
-        )
-    }
-
-    pub fn generate_unique_key(&self) -> String {
-        format!(
-            "{}/{}->{}/{}",
-            self.base.upstream_owner,
-            self.base.upstream_repo,
-            self.base.my_owner,
-            self.base.my_repo
-        )
-    }
-}
-
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct GitHubRelease {
     pub tag_name: String,
@@ -227,7 +169,7 @@ impl GitHubRelease {
 #[async_trait::async_trait(?Send)]
 pub trait Repository {
     async fn get_all_configs(&self) -> Result<Vec<ProjectConfig>>;
-    async fn add_config(&self, base: BaseProjectConfig) -> Result<ProjectConfig>;
+    async fn add_config(&self, base: CreateProjectRequest) -> Result<ProjectConfig>;
 
     // 标准删除：只负责删除，不返回内容
     async fn delete_config(&self, id: &str) -> Result<()>;
@@ -291,7 +233,7 @@ impl Repository for KvProjectRepository {
         Ok(configs)
     }
 
-    async fn add_config(&self, base: BaseProjectConfig) -> Result<ProjectConfig> {
+    async fn add_config(&self, base: CreateProjectRequest) -> Result<ProjectConfig> {
         let config = ProjectConfig::new(base);
         let key = format!("{}{}", PREFIX_PROJECT, config.unique_key);
 
@@ -517,7 +459,7 @@ async fn create_project(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
         return Ok(res);
     }
 
-    let req_data: BaseProjectConfig =
+    let req_data: CreateProjectRequest =
         unwrap_or_resp!(req.json().await, "Invalid request body", 400);
 
     let repo = unwrap_or_resp!(
@@ -527,11 +469,6 @@ async fn create_project(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
     );
 
     respond!(json, repo.add_config(req_data).await, "Add config failed")
-}
-
-#[derive(Deserialize)]
-struct DeleteTarget {
-    id: String,
 }
 
 async fn delete_project(mut req: Request, ctx: RouteContext<()>) -> Result<Response> {
@@ -689,7 +626,7 @@ mod tests {
         async fn get_all_configs(&self) -> Result<Vec<ProjectConfig>> {
             Ok(self.configs.borrow().clone())
         }
-        async fn add_config(&self, base: BaseProjectConfig) -> Result<ProjectConfig> {
+        async fn add_config(&self, base: CreateProjectRequest) -> Result<ProjectConfig> {
             let config = ProjectConfig::new(base);
             self.configs
                 .borrow_mut()
@@ -729,7 +666,7 @@ mod tests {
         let client = MockHttpClient::new();
         let resolver = MockSecretResolver::new().with_secret("MY_CUSTOM_TOKEN", "secret_value_123");
 
-        let base_config = BaseProjectConfig {
+        let base_config = CreateProjectRequest {
             upstream_owner: "u".into(),
             upstream_repo: "r".into(),
             my_owner: "m".into(),
@@ -772,7 +709,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_api_logic() {
         let repo = MockRepository::new();
-        let base_config = BaseProjectConfig {
+        let base_config = CreateProjectRequest {
             upstream_owner: "u".into(),
             upstream_repo: "r".into(),
             my_owner: "m".into(),

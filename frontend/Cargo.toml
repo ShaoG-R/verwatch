@@ -1,0 +1,13 @@
+[package]
+name = "verwatch-frontend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+leptos = { version = "0.8", features = ["csr"] }
+leptos_router = { version = "0.8.10" }
+gloo-net = "0.6"
+gloo-storage = "0.3"
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+verwatch-shared = { path = "../shared" }

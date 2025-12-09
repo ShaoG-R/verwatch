@@ -1498,7 +1498,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
-name = "verwatch"
+name = "verwatch-backend"
 version = "0.1.0"
 dependencies = [
  "async-trait",
@@ -1508,7 +1508,15 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "verwatch-shared",
  "worker",
+]
+
+[[package]]
+name = "verwatch-shared"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
