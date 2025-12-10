@@ -84,7 +84,7 @@ impl<'a, R: Registry> AdminLogic<'a, R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::repository::tests::MockRegistry;
+    use crate::{error::AppErrorStatus, repository::tests::MockRegistry};
     use verwatch_shared::{BaseConfig, ComparisonMode, TimeConfig};
 
     fn make_request(upstream_repo: &str) -> CreateProjectRequest {
