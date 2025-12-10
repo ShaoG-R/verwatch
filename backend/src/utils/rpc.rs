@@ -78,7 +78,7 @@ impl RpcClient {
             }
 
             // Fallback: 统一封装为 AppError::Store
-            return Err(AppError::Store(format!(
+            return Err(AppError::store(format!(
                 "RPC Error [{}]: {}",
                 response.status_code(),
                 error_text

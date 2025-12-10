@@ -29,16 +29,14 @@ impl<'a, R: Registry> AdminLogic<'a, R> {
     pub async fn create_project(&self, req: CreateProjectRequest) -> Result<ProjectConfig> {
         // 业务校验：防止空仓库名
         if req.base_config.upstream_repo.trim().is_empty() {
-            return Err(AppError::InvalidInput(
-                "Upstream repo cannot be empty".into(),
-            ));
+            return Err(AppError::invalid_input("Upstream repo cannot be empty"));
         }
 
         let config = ProjectConfig::new(req);
 
         // 检查是否已存在
         if self.registry.is_registered(&config.unique_key).await? {
-            return Err(AppError::Conflict(format!(
+            return Err(AppError::conflict(format!(
                 "Project '{}' already exists",
                 config.unique_key
             )));
@@ -126,7 +124,13 @@ mod tests {
 
         // 无效输入
         let result = logic.create_project(make_request("")).await;
-        assert!(matches!(result, Err(AppError::InvalidInput(_))));
+        assert!(matches!(
+            result,
+            Err(AppError {
+                status: AppErrorStatus::InvalidInput,
+                ..
+            })
+        ));
     }
 
     #[tokio::test]
@@ -139,7 +143,13 @@ mod tests {
 
         // 第二次创建应冲突
         let result = logic.create_project(make_request("rust")).await;
-        assert!(matches!(result, Err(AppError::Conflict(_))));
+        assert!(matches!(
+            result,
+            Err(AppError {
+                status: AppErrorStatus::Conflict,
+                ..
+            })
+        ));
     }
 
     #[tokio::test]

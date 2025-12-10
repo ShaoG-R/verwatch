@@ -108,7 +108,7 @@ fn ensure_admin_auth(req: &Request, env: &Env, config: &RuntimeConfig) -> error:
     let auth_header = req
         .headers()
         .get(HEADER_AUTH_KEY)
-        .map_err(|e| AppError::InvalidInput(e.to_string()))?
+        .map_err(|e| AppError::invalid_input(e.to_string()))?
         .unwrap_or_default();
     let secret = env
         .secret(&config.admin_secret_name)
@@ -116,7 +116,7 @@ fn ensure_admin_auth(req: &Request, env: &Env, config: &RuntimeConfig) -> error:
         .unwrap_or_default();
 
     if secret.is_empty() || !constant_time_eq(&auth_header, &secret) {
-        return Err(AppError::Unauthorized("Invalid Secret".into()));
+        return Err(AppError::unauthorized("Invalid Secret"));
     }
     Ok(())
 }
@@ -133,7 +133,7 @@ async fn list_projects(req: Request, ctx: RouteContext<()>) -> Result<Response> 
 
     let registry = unwrap_or_resp!(
         DoProjectRegistry::new(&ctx.env, &cfg.registry_binding),
-        AppError::Store
+        AppError::store
     );
 
     let logic = AdminLogic::new(&registry);
@@ -149,14 +149,14 @@ async fn create_project(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
     }
 
     let req_data: CreateProjectRequest =
-        unwrap_or_resp!(req.json().await, |e| AppError::Serialization(format!(
+        unwrap_or_resp!(req.json().await, |e| AppError::serialization(format!(
             "Invalid JSON Body: {}",
             e
         )));
 
     let registry = unwrap_or_resp!(
         DoProjectRegistry::new(&ctx.env, &cfg.registry_binding),
-        AppError::Store
+        AppError::store
     );
 
     let logic = AdminLogic::new(&registry);
@@ -171,13 +171,13 @@ async fn delete_project(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
         return Ok(map_error_to_response(e));
     }
 
-    let target: DeleteTarget = unwrap_or_resp!(req.json().await, |e| AppError::Serialization(
+    let target: DeleteTarget = unwrap_or_resp!(req.json().await, |e| AppError::serialization(
         format!("Invalid JSON Body: {}", e)
     ));
 
     let registry = unwrap_or_resp!(
         DoProjectRegistry::new(&ctx.env, &cfg.registry_binding),
-        AppError::Store
+        AppError::store
     );
 
     let logic = AdminLogic::new(&registry);
@@ -197,7 +197,7 @@ async fn pop_project(mut req: Request, ctx: RouteContext<()>) -> Result<Response
     }
 
     let req_data: PopProjectRequest =
-        unwrap_or_resp!(req.json().await, |e| AppError::Serialization(format!(
+        unwrap_or_resp!(req.json().await, |e| AppError::serialization(format!(
             "Invalid JSON Body: {}",
             e
         )));
@@ -205,7 +205,7 @@ async fn pop_project(mut req: Request, ctx: RouteContext<()>) -> Result<Response
 
     let registry = unwrap_or_resp!(
         DoProjectRegistry::new(&ctx.env, &cfg.registry_binding),
-        AppError::Store
+        AppError::store
     );
 
     let logic = AdminLogic::new(&registry);
@@ -220,13 +220,13 @@ async fn switch_monitor(mut req: Request, ctx: RouteContext<()>) -> Result<Respo
         return Ok(map_error_to_response(e));
     }
 
-    let cmd: SwitchMonitorRequest = unwrap_or_resp!(req.json().await, |e| AppError::Serialization(
+    let cmd: SwitchMonitorRequest = unwrap_or_resp!(req.json().await, |e| AppError::serialization(
         format!("Invalid JSON Body: {}", e)
     ));
 
     let registry = unwrap_or_resp!(
         DoProjectRegistry::new(&ctx.env, &cfg.registry_binding),
-        AppError::Store
+        AppError::store
     );
 
     let logic = AdminLogic::new(&registry);
@@ -241,13 +241,13 @@ async fn trigger_check(mut req: Request, ctx: RouteContext<()>) -> Result<Respon
         return Ok(map_error_to_response(e));
     }
 
-    let cmd: TriggerCheckRequest = unwrap_or_resp!(req.json().await, |e| AppError::Serialization(
+    let cmd: TriggerCheckRequest = unwrap_or_resp!(req.json().await, |e| AppError::serialization(
         format!("Invalid JSON Body: {}", e)
     ));
 
     let registry = unwrap_or_resp!(
         DoProjectRegistry::new(&ctx.env, &cfg.registry_binding),
-        AppError::Store
+        AppError::store
     );
 
     let logic = AdminLogic::new(&registry);

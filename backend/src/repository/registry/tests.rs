@@ -90,7 +90,7 @@ impl MonitorClient for TestMonitorClient {
         self.ctx
             .push_log(format!("monitor:get_config:{}", unique_key));
         if self.ctx.fail_get_config_keys.borrow().contains(unique_key) {
-            return Err(AppError::Store("Simulated failure".into()));
+            return Err(AppError::store("Simulated failure"));
         }
         Ok(self.ctx.monitor_configs.borrow().get(unique_key).cloned())
     }

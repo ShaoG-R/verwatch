@@ -105,7 +105,7 @@ where
     pub async fn switch_monitor(&self, cmd: SwitchMonitorCmd) -> Result<()> {
         let mut config: ProjectConfig = match self.storage.get(STATE_KEY_CONFIG).await? {
             Some(c) => c,
-            None => return Err(AppError::NotFound("No config found".into())),
+            None => return Err(AppError::not_found("No config found")),
         };
 
         let is_currently_paused = config.state.is_paused();
@@ -134,7 +134,7 @@ where
         let config: Option<ProjectConfig> = self.storage.get(STATE_KEY_CONFIG).await?;
         match config {
             Some(cfg) => self.perform_check_flow(&cfg).await,
-            None => Err(AppError::NotFound("No config found".into())),
+            None => Err(AppError::not_found("No config found")),
         }
     }
 
@@ -206,7 +206,7 @@ where
                 &config.request.base_config.upstream_repo,
             )
             .await
-            .map_err(|e| AppError::Store(format!("GitHub API: {}", e)))?;
+            .map_err(|e| AppError::store(format!("GitHub API: {}", e)))?;
 
         // B & C. 获取本地状态并进行比较
         // 存储的是 GitHubRelease 结构体(JSON)，而不仅仅是 String
@@ -245,12 +245,12 @@ where
         let pat = self
             .env
             .secret(pat_key)
-            .ok_or_else(|| AppError::Store(format!("Secret '{}' missing", pat_key)))?;
+            .ok_or_else(|| AppError::store(format!("Secret '{}' missing", pat_key)))?;
 
         gateway
             .trigger_dispatch(config, &remote_release.tag_name, &pat)
             .await
-            .map_err(|e| AppError::Store(format!("Dispatch: {}", e)))?;
+            .map_err(|e| AppError::store(format!("Dispatch: {}", e)))?;
 
         // E. 更新状态
         // 存储整个 remote_release 对象，以便下次比较时保留 mode 信息
