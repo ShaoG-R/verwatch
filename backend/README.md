@@ -102,11 +102,22 @@ wrangler secret put GITHUB_TOKEN
 # 输入您的 GitHub Personal Access Token (Fine-grained personal access tokens 下无需勾选)
 ```
 
+> **验证命令**:
+> ```bash
+> curl -H "Authorization: Bearer <YOUR_TOKEN>" -H "User-Agent: VerWatch" -I https://api.github.com/user
+> ```
+
 **MY_GITHUB_PAT**: 用于触发下游仓库的 Dispatch 事件（必须有写权限）。
 ```bash
 wrangler secret put MY_GITHUB_PAT
 # 输入您的 GitHub PAT (Fine-grained personal access tokens 下勾选 Context，设置 Read and Write)
 ```
+
+> **验证命令**:
+> ```bash
+> curl -H "Authorization: Bearer <YOUR_TOKEN>" -H "User-Agent: VerWatch" -I https://api.github.com/user
+> ```
+> *提示: 检查返回头 `x-oauth-scopes` 是否包含 `repo` 或 `contents:write` 权限。*
 
 ### 4. 部署到 Cloudflare
 
