@@ -8,87 +8,84 @@ pub trait ApiRequest: Serialize + DeserializeOwned {
     type Response: Serialize + DeserializeOwned;
     /// DO 内部路由路径
     const PATH: &'static str;
-    /// 建议的 HTTP 方法（通常统一用 POST 简化传参，也可以保留语义）
+    /// 建议的 HTTP 方法
     const METHOD: Method = Method::Post;
 }
 
-// --- 具体请求定义 ---
+// =========================================================
+// Registry 指令定义
+// =========================================================
 
-// 1. 获取项目列表
+/// 注册一个 ProjectMonitor
+/// 接收完整的 ProjectConfig，内部计算 unique_key 并调用 Monitor setup
 #[derive(Serialize, Deserialize)]
-pub struct ListProjectsCmd {
-    pub prefix: Option<String>,
-}
-impl ApiRequest for ListProjectsCmd {
-    type Response = Vec<ProjectConfig>;
-    const PATH: &'static str = "/rpc/projects/list";
-}
-
-// 2. 批量获取项目+状态 (优化版)
-#[derive(Serialize, Deserialize)]
-pub struct ListProjectsWithStatesCmd;
-impl ApiRequest for ListProjectsWithStatesCmd {
-    type Response = Vec<(ProjectConfig, Option<String>)>;
-    const PATH: &'static str = "/rpc/projects/list_with_states";
-}
-
-// 3. 获取单个项目
-#[derive(Serialize, Deserialize)]
-pub struct GetProjectCmd {
-    pub id: String,
-}
-impl ApiRequest for GetProjectCmd {
-    type Response = Option<ProjectConfig>;
-    const PATH: &'static str = "/rpc/projects/get";
-}
-
-// 4. 保存项目
-#[derive(Serialize, Deserialize)]
-pub struct SaveProjectCmd {
+pub struct RegisterMonitorCmd {
     pub config: ProjectConfig,
 }
-impl ApiRequest for SaveProjectCmd {
-    type Response = (); // 无返回值，或返回 String 消息
-    const PATH: &'static str = "/rpc/projects/save";
+
+impl ApiRequest for RegisterMonitorCmd {
+    type Response = String; // 返回 unique_key
+    const PATH: &'static str = "/registry/register";
+    const METHOD: Method = Method::Post;
 }
 
-// 5. 删除项目
+/// 注销一个 ProjectMonitor
+/// 内部调用 Monitor stop
 #[derive(Serialize, Deserialize)]
-pub struct DeleteProjectCmd {
-    pub id: String,
+pub struct UnregisterMonitorCmd {
+    pub unique_key: String,
 }
-impl ApiRequest for DeleteProjectCmd {
+
+impl ApiRequest for UnregisterMonitorCmd {
     type Response = bool;
-    const PATH: &'static str = "/rpc/projects/delete";
+    const PATH: &'static str = "/registry/unregister";
+    const METHOD: Method = Method::Delete;
 }
 
-// 6. 切换暂停状态 (原子操作)
+/// 获取所有已注册的 Monitor 的 ProjectConfig 列表
+/// 会遍历查询每个 Monitor
 #[derive(Serialize, Deserialize)]
-pub struct TogglePauseCmd {
-    pub id: String,
-}
-impl ApiRequest for TogglePauseCmd {
-    type Response = bool; // 返回新的状态
-    const PATH: &'static str = "/rpc/projects/toggle";
-    const METHOD: Method = Method::Patch; // 可以保留语义，也可以统一 POST
+pub struct ListMonitorsCmd;
+
+impl ApiRequest for ListMonitorsCmd {
+    type Response = Vec<ProjectConfig>;
+    const PATH: &'static str = "/registry/list";
+    const METHOD: Method = Method::Get;
 }
 
-// 7. 状态管理 (KV)
+/// 检查某个 Monitor 是否已注册
 #[derive(Serialize, Deserialize)]
-pub struct GetVersionStateCmd {
-    pub key: String,
-}
-impl ApiRequest for GetVersionStateCmd {
-    type Response = Option<String>;
-    const PATH: &'static str = "/rpc/state/get";
+pub struct IsRegisteredCmd {
+    pub unique_key: String,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct SetVersionStateCmd {
-    pub key: String,
-    pub value: String,
+impl ApiRequest for IsRegisteredCmd {
+    type Response = bool;
+    const PATH: &'static str = "/registry/exists";
+    const METHOD: Method = Method::Get;
 }
-impl ApiRequest for SetVersionStateCmd {
-    type Response = ();
-    const PATH: &'static str = "/rpc/state/set";
+
+/// 切换 Monitor 监控状态 (Start/Stop)
+#[derive(Serialize, Deserialize)]
+pub struct RegistrySwitchMonitorCmd {
+    pub unique_key: String,
+    pub paused: bool,
+}
+
+impl ApiRequest for RegistrySwitchMonitorCmd {
+    type Response = bool;
+    const PATH: &'static str = "/registry/switch";
+    const METHOD: Method = Method::Post;
+}
+
+/// 手动触发 Monitor 检查
+#[derive(Serialize, Deserialize)]
+pub struct RegistryTriggerCheckCmd {
+    pub unique_key: String,
+}
+
+impl ApiRequest for RegistryTriggerCheckCmd {
+    type Response = bool; // 指示触发命令是否成功发送
+    const PATH: &'static str = "/registry/trigger";
+    const METHOD: Method = Method::Post;
 }

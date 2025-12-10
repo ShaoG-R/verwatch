@@ -16,6 +16,12 @@ pub fn AddProjectDialog(#[prop(into)] on_add: Callback<CreateProjectRequest>) ->
     let (comp_mode, set_comp_mode) = signal(ComparisonMode::PublishedAt);
     let (token_secret, set_token_secret) = signal(String::new());
 
+    // Time Config Signals
+    let (use_custom_time, set_use_custom_time) = signal(false);
+    let (check_interval_val, set_check_interval_val) = signal(1u64);
+    let (check_interval_unit, set_check_interval_unit) = signal("hours".to_string());
+    let (retry_interval_seconds, set_retry_interval_seconds) = signal(10u64);
+
     let reset_form = move || {
         set_u_owner.set(String::new());
         set_u_repo.set(String::new());
@@ -23,6 +29,10 @@ pub fn AddProjectDialog(#[prop(into)] on_add: Callback<CreateProjectRequest>) ->
         set_m_repo.set(String::new());
         set_comp_mode.set(ComparisonMode::PublishedAt);
         set_token_secret.set(String::new());
+        set_use_custom_time.set(false);
+        set_check_interval_val.set(1);
+        set_check_interval_unit.set("hours".to_string());
+        set_retry_interval_seconds.set(10);
     };
 
     Effect::new(move |_| {
@@ -52,10 +62,28 @@ pub fn AddProjectDialog(#[prop(into)] on_add: Callback<CreateProjectRequest>) ->
         };
 
         let req = CreateProjectRequest {
-            upstream_owner: u_owner.get(),
-            upstream_repo: u_repo.get(),
-            my_owner: m_owner.get(),
-            my_repo: m_repo.get(),
+            base_config: verwatch_shared::BaseConfig {
+                upstream_owner: u_owner.get(),
+                upstream_repo: u_repo.get(),
+                my_owner: m_owner.get(),
+                my_repo: m_repo.get(),
+            },
+            time_config: if use_custom_time.get() {
+                let multiplier = if check_interval_unit.get() == "minutes" {
+                    60
+                } else {
+                    3600
+                };
+                verwatch_shared::TimeConfig {
+                    check_interval: std::time::Duration::from_secs(
+                        check_interval_val.get() * multiplier,
+                    ),
+                    retry_interval: std::time::Duration::from_secs(retry_interval_seconds.get()),
+                }
+            } else {
+                verwatch_shared::TimeConfig::default()
+            },
+            initial_delay: std::time::Duration::from_secs(0),
             comparison_mode: comp_mode.get(),
             dispatch_token_secret: secret_opt,
         };
@@ -168,6 +196,62 @@ pub fn AddProjectDialog(#[prop(into)] on_add: Callback<CreateProjectRequest>) ->
                             <span class="label-text-alt text-base-content/50">"留空以使用全局 MY_GITHUB_PAT"</span>
                         </label>
                     </div>
+
+                    // Time Config UI
+                    <div class="form-control">
+                        <label class="label cursor-pointer">
+                            <span class="label-text font-bold">"自定义时间配置"</span>
+                            <input type="checkbox" class="toggle toggle-primary"
+                                prop:checked=use_custom_time
+                                on:change=move |ev| set_use_custom_time.set(event_target_checked(&ev))
+                            />
+                        </label>
+                    </div>
+
+                    {move || if use_custom_time.get() {
+                        view! {
+                            <div class="grid grid-cols-2 gap-4 bg-base-200 p-4 rounded-lg">
+                                <div class="form-control">
+                                    <label class="label">
+                                        <span class="label-text">"检查间隔"</span>
+                                    </label>
+                                    <div class="join">
+                                        <input type="number" min="1" required
+                                            class="input input-bordered join-item w-full"
+                                            prop:value=check_interval_val
+                                            on:input=move |ev| {
+                                                if let Ok(val) = event_target_value(&ev).parse::<u64>() {
+                                                    set_check_interval_val.set(val);
+                                                }
+                                            }
+                                        />
+                                        <select class="select select-bordered join-item"
+                                            on:change=move |ev| set_check_interval_unit.set(event_target_value(&ev))
+                                        >
+                                            <option value="hours" selected=move || check_interval_unit.get() == "hours">"小时"</option>
+                                            <option value="minutes" selected=move || check_interval_unit.get() == "minutes">"分钟"</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-control">
+                                    <label class="label">
+                                        <span class="label-text">"重试间隔 (秒)"</span>
+                                    </label>
+                                    <input type="number" min="1" required
+                                        class="input input-bordered w-full"
+                                        prop:value=retry_interval_seconds
+                                        on:input=move |ev| {
+                                            if let Ok(val) = event_target_value(&ev).parse::<u64>() {
+                                                set_retry_interval_seconds.set(val);
+                                            }
+                                        }
+                                    />
+                                </div>
+                            </div>
+                        }.into_any()
+                    } else {
+                        view! { <></> }.into_any()
+                    }}
 
                     <div class="modal-action">
                          <button type="button" class="btn btn-ghost" on:click=move |_| set_open.set(false)>"取消"</button>

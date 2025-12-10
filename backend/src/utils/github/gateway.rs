@@ -1,8 +1,9 @@
-use crate::ProjectConfig; // 引用 lib.rs 中的模型
+use crate::utils::github::release::{GitHubRelease, ReleaseTimestamp};
 use crate::utils::request::{HttpClient, HttpMethod, HttpRequest};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
-use verwatch_shared::ComparisonMode;
+use verwatch_shared::chrono::{DateTime, Utc};
+use verwatch_shared::{ComparisonMode, ProjectConfig};
 use worker::{Error, Result};
 
 pub const GITHUB_API_VERSION: &str = "2022-11-28";
@@ -53,40 +54,21 @@ impl<'a> DispatchEvent<'a> {
 }
 
 // =========================================================
-// 领域模型
+// 2. Gateway
 // =========================================================
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct GitHubRelease {
-    pub tag_name: String,
-    pub published_at: Option<String>,
-    pub updated_at: Option<String>,
-}
-
-impl GitHubRelease {
-    pub fn get_comparison_timestamp(&self, mode: ComparisonMode) -> Option<&String> {
-        match mode {
-            ComparisonMode::PublishedAt => self.published_at.as_ref(),
-            ComparisonMode::UpdatedAt => self.updated_at.as_ref(),
-        }
-    }
-}
-
-// =========================================================
-// 服务封装: GitHubGateway
-// =========================================================
-
-/// 封装所有与 GitHub 交互的细节
 pub struct GitHubGateway<'a, C: HttpClient> {
     client: &'a C,
     global_read_token: Option<String>,
+    mode: ComparisonMode,
 }
 
 impl<'a, C: HttpClient> GitHubGateway<'a, C> {
-    pub fn new(client: &'a C, global_read_token: Option<String>) -> Self {
+    pub fn new(client: &'a C, global_read_token: Option<String>, mode: ComparisonMode) -> Self {
         Self {
             client,
             global_read_token,
+            mode,
         }
     }
 
@@ -108,7 +90,47 @@ impl<'a, C: HttpClient> GitHubGateway<'a, C> {
                 resp.status, url
             )));
         }
-        resp.json()
+
+        // 手动解析 JSON Value
+        let root: serde_json::Value = resp.json()?;
+
+        // 1. 获取 tag_name
+        let tag_name = root
+            .get("tag_name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| Error::from("Missing 'tag_name' in response"))?
+            .to_string();
+
+        // 2. 根据 mode 获取对应时间字段，如果字段不存在则报错
+        let timestamp = match self.mode {
+            ComparisonMode::PublishedAt => {
+                let s = root
+                    .get("published_at")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| {
+                        Error::from("Missing 'published_at' field required by config")
+                    })?;
+                let t = DateTime::parse_from_rfc3339(s)
+                    .map_err(|e| Error::from(format!("Invalid time format: {}", e)))?
+                    .with_timezone(&Utc);
+                ReleaseTimestamp::Published(t)
+            }
+            ComparisonMode::UpdatedAt => {
+                let s = root
+                    .get("updated_at")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| Error::from("Missing 'updated_at' field required by config"))?;
+                let t = DateTime::parse_from_rfc3339(s)
+                    .map_err(|e| Error::from(format!("Invalid time format: {}", e)))?
+                    .with_timezone(&Utc);
+                ReleaseTimestamp::Updated(t)
+            }
+        };
+
+        Ok(GitHubRelease {
+            tag_name,
+            timestamp,
+        })
     }
 
     pub async fn trigger_dispatch(
@@ -119,8 +141,8 @@ impl<'a, C: HttpClient> GitHubGateway<'a, C> {
     ) -> Result<()> {
         let payload = json!({ "version": version });
         let event = DispatchEvent {
-            owner: &config.base.my_owner,
-            repo: &config.base.my_repo,
+            owner: &config.request.base_config.my_owner,
+            repo: &config.request.base_config.my_repo,
             token,
             event_type: "upstream_update",
             client_payload: payload,

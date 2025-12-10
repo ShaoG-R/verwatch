@@ -1,5 +1,7 @@
 use std::fmt;
 
+use worker::wasm_bindgen::JsValue;
+
 /// Application Domain Errors
 ///
 /// 这是一个高内聚的错误定义，它不仅包含错误信息，还包含了错误对应的语义（状态码）。
@@ -84,5 +86,13 @@ impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
         // 专门捕获 JSON 错误，转换为 Serialization 变体
         AppError::Serialization(e.to_string())
+    }
+}
+
+impl From<JsValue> for AppError {
+    fn from(e: JsValue) -> Self {
+        // JsValue 错误（通常来自 JS 迭代器）归类为 Store 错误
+        let msg = e.as_string().unwrap_or_else(|| format!("{:?}", e));
+        AppError::Store(msg)
     }
 }

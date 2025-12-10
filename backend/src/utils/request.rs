@@ -163,11 +163,11 @@ impl MockHttpClient {
         }
     }
 
-    pub fn mock_response(&self, url: &str, status: u16, body: serde_json::Value) {
-        self.responses
-            .borrow_mut()
-            .insert(url.to_string(), (status, body.to_string()));
-    }
+    // pub fn mock_response(&self, url: &str, status: u16, body: serde_json::Value) {
+    //     self.responses
+    //         .borrow_mut()
+    //         .insert(url.to_string(), (status, body.to_string()));
+    // }
 }
 
 #[cfg(test)]

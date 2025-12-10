@@ -1,5 +1,9 @@
 use gloo_net::http::Request;
-use verwatch_shared::{CreateProjectRequest, DeleteTarget, ProjectConfig};
+
+use verwatch_shared::{
+    CreateProjectRequest, DeleteTarget, ProjectConfig,
+    protocol::{PopProjectRequest, SwitchMonitorRequest, TriggerCheckRequest},
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VerWatchApi {
@@ -87,7 +91,7 @@ impl VerWatchApi {
     #[allow(dead_code)]
     pub async fn pop_project(&self, id: String) -> Result<Option<ProjectConfig>, String> {
         let url = self.url("/api/projects/pop");
-        let target = DeleteTarget { id };
+        let target = PopProjectRequest { id };
         let res = Request::delete(&url)
             .header(self.auth_header().0, self.auth_header().1)
             .header("Content-Type", "application/json")
@@ -106,22 +110,43 @@ impl VerWatchApi {
             .map_err(|e| e.to_string())
     }
 
-    pub async fn toggle_pause_project(&self, id: String) -> Result<bool, String> {
-        let url = self.url("/api/projects/toggle_pause");
-        let target = DeleteTarget { id };
+    /// 切换监控状态 (Start/Stop)
+    pub async fn switch_monitor(&self, unique_key: String, paused: bool) -> Result<bool, String> {
+        let url = self.url("/api/projects/switch");
+        let payload = SwitchMonitorRequest { unique_key, paused };
         let res = Request::post(&url)
             .header(self.auth_header().0, self.auth_header().1)
             .header("Content-Type", "application/json")
-            .json(&target)
+            .json(&payload)
             .map_err(|e| e.to_string())?
             .send()
             .await
             .map_err(|e| e.to_string())?;
 
         if !res.ok() {
-            return Err(format!("切换暂停状态失败: {}", res.status()));
+            return Err(format!("切换状态失败: {}", res.status()));
         }
 
         res.json::<bool>().await.map_err(|e| e.to_string())
+    }
+
+    /// 触发立即检查
+    pub async fn trigger_check(&self, unique_key: String) -> Result<(), String> {
+        let url = self.url("/api/projects/trigger");
+        let payload = TriggerCheckRequest { unique_key };
+        let res = Request::post(&url)
+            .header(self.auth_header().0, self.auth_header().1)
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .map_err(|e| e.to_string())?
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !res.ok() {
+            return Err(format!("触发检查失败: {}", res.status()));
+        }
+
+        Ok(())
     }
 }

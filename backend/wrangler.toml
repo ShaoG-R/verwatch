@@ -8,29 +8,28 @@ workers_dev = true
 # 显式开启预览功能
 preview_urls = true
 
-# 替换 KV 为 Durable Object 绑定
+# Durable Object 绑定
 [durable_objects]
 bindings = [
-    # class_name 需与 durable_object.rs 中的 impl DurableObject for ProjectStore 中的 class_name 一致 
-    { name = "PROJECT_STORE", class_name = "ProjectStore" } 
+    # ProjectRegistry: 管理所有 Monitor 的注册表 (单例)
+    { name = "PROJECT_REGISTRY", class_name = "ProjectRegistry" },
+    # ProjectMonitor: 每个项目的监控实例 (按 unique_key 分片)
+    { name = "PROJECT_MONITOR", class_name = "ProjectMonitor" }
 ]
 
 # 环境变量配置 (Vars)
 [vars]
-# DO 绑定名称，需与上面的 binding 保持一致
-DO_BINDING = "PROJECT_STORE"
+# Registry DO 绑定名称
+REGISTRY_BINDING = "PROJECT_REGISTRY"
 # Secret 变量名配置
 ADMIN_SECRET_NAME = "ADMIN_SECRET"
 GITHUB_TOKEN_NAME = "GITHUB_TOKEN"
 PAT_TOKEN_NAME = "MY_GITHUB_PAT"
 
 [[migrations]]
-tag = "v1" # 这是第一次部署，标记为 v1
-new_sqlite_classes = ["ProjectStore"] # 声明 ProjectStore 是一个新引入的类
-
-# 定时任务配置
-[triggers]
-crons = ["0 * * * *"]
+tag = "v2"
+new_sqlite_classes = ["ProjectRegistry", "ProjectMonitor"]
+deleted_classes = ["ProjectStore"]
 
 [build]
 command = "cargo install -q worker-build && worker-build --release"

@@ -1,17 +1,52 @@
 # VerWatch: Serverless GitHub Release Monitor
 
-**VerWatch** 是一个基于 Rust 和 Cloudflare Workers (Durable Objects) 构建的轻量级“看门狗”服务。它能够定期监控上游 GitHub 仓库的最新 Release 版本，一旦发现更新，就会自动通过 `repository_dispatch` 事件触发您自己仓库的 GitHub Actions 工作流。
+**VerWatch** 是一个基于 Rust 和 Cloudflare Workers (Durable Objects) 构建的轻量级"看门狗"服务。它能够定期监控上游 GitHub 仓库的最新 Release 版本，一旦发现更新，就会自动通过 `repository_dispatch` 事件触发您自己仓库的 GitHub Actions 工作流。
 
 它是维护 Fork 版本、Docker 镜像自动构建或同步上游更新的理想工具。
 
 ## ✨ 特性
 
 - **轻量高效**：基于 Cloudflare Workers 运行，无服务器维护成本。
-- **强一致性**：使用 **Durable Objects** 存储配置和状态，解决了最终一致性问题，并支持原子操作。
+- **分布式架构**：每个项目使用独立的 Durable Object (ProjectMonitor) 处理，天然水平扩展。
+- **自主调度**：每个 Monitor 通过 Alarm 机制独立调度检查任务，无需中心化 Cron。
 - **安全可靠**：支持 GitHub Token 和 Admin Secret 加密存储。
 - **配置灵活**：支持自定义版本对比模式（发布时间 vs 更新时间）。
 - **Rust 驱动**：利用 Rust 的强类型和高性能特性。
 - **跨域支持**：内置 CORS 支持，允许前端应用直接调用 API。
+
+## 🏗️ 架构
+
+``` mermaid
+graph TD
+    %% 样式定义
+    classDef api fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000;
+    classDef registry fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,color:#000;
+    classDef monitor fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,color:#000;
+
+    %% Admin API 层
+    Admin["<b>Admin API (lib.rs)</b><br/>/api/projects (CRUD 操作)"]:::api
+
+    %% 注册表层
+    Registry["<b>ProjectRegistry DO</b><br/>(单例，注册表)<br/>──────────────<br/>register(config) → 调用 Monitor.setup()<br/>unregister(key) → 调用 Monitor.stop()<br/>list() → 遍历查询所有 Monitor.config"]:::registry
+
+    %% 监控实例层
+    subgraph Monitors [Durable Objects 实例群]
+        direction LR
+        MonA["<b>ProjectMonitor</b><br/>(项目 A)<br/>───<br/>config<br/>version<br/>alarm ⏰"]:::monitor
+        MonB["<b>ProjectMonitor</b><br/>(项目 B)<br/>───<br/>config<br/>version<br/>alarm ⏰"]:::monitor
+        MonC["<b>ProjectMonitor</b><br/>(项目 C)<br/>───<br/>config<br/>version<br/>alarm ⏰"]:::monitor
+    end
+
+    %% 连接关系
+    Admin --> Registry
+    Registry --> MonA
+    Registry --> MonB
+    Registry --> MonC
+
+    %% 调整连接线样式
+    linkStyle 0 stroke:#01579b,stroke-width:2px;
+    linkStyle 1,2,3 stroke:#fbc02d,stroke-width:2px;
+```
 
 ## 🛠️ 环境准备
 
@@ -30,47 +65,25 @@
 
 ```bash
 git clone https://github.com/ShaoG-R/verwatch.git
-cd verwatch
+cd verwatch/backend
 ```
 
 ### 2. 配置 wrangler.toml
 
-在项目 `backend` 目录修改 `wrangler.toml` 文件。我们现在使用 Durable Objects 代替 KV：
+在项目 `backend` 目录的 `wrangler.toml` 文件已预配置好。关键配置说明：
 
 ```toml
-name = "verwatch"
-main = "build/worker/shim.mjs"
-compatibility_date = "2023-01-01"
-
-# 显式开启 workers.dev 域名
-workers_dev = true
-
-# 替换 KV 为 Durable Object 绑定
 [durable_objects]
 bindings = [
-    # class_name 需与 durable_object.rs 中的 impl DurableObject for ProjectStore 中的 class_name 一致 
-    { name = "PROJECT_STORE", class_name = "ProjectStore" } 
+    # ProjectRegistry: 管理所有 Monitor 的注册表 (单例)
+    { name = "PROJECT_REGISTRY", class_name = "ProjectRegistry" },
+    # ProjectMonitor: 每个项目的监控实例 (按 unique_key 分片)
+    { name = "PROJECT_MONITOR", class_name = "ProjectMonitor" }
 ]
-# 环境变量配置 (Vars)
+
 [vars]
-# DO 绑定名称，需与上面的 binding 保持一致
-DO_BINDING = "PROJECT_STORE"
-# 以下变量定义了 Secret 的"变量名"，保持默认即可
+REGISTRY_BINDING = "PROJECT_REGISTRY"
 ADMIN_SECRET_NAME = "ADMIN_SECRET"
-GITHUB_TOKEN_NAME = "GITHUB_TOKEN"
-PAT_TOKEN_NAME = "MY_GITHUB_PAT"
-
-# 定时任务配置 (Cron Triggers)
-# 示例：每小时运行一次
-[triggers]
-crons = ["0 * * * *"]
-
-[[migrations]]
-tag = "v1" # 这是第一次部署，标记为 v1
-new_sqlite_classes = ["ProjectStore"] # 声明 ProjectStore 是一个新引入的类
-
-[build]
-command = "cargo install -q worker-build && worker-build --release"
 ```
 
 ### 3. 设置敏感密钥 (Secrets)
@@ -92,7 +105,7 @@ wrangler secret put GITHUB_TOKEN
 **MY_GITHUB_PAT**: 用于触发下游仓库的 Dispatch 事件（必须有写权限）。
 ```bash
 wrangler secret put MY_GITHUB_PAT
-# 输入您的 GitHub PAT (Fine-grained personal access tokens 下勾选Context，设置Read and Write)
+# 输入您的 GitHub PAT (Fine-grained personal access tokens 下勾选 Context，设置 Read and Write)
 ```
 
 ### 4. 部署到 Cloudflare
@@ -149,20 +162,32 @@ curl -X POST https://verwatch.your-subdomain.workers.dev/api/projects \
   -H "X-Auth-Key: my_super_secure_password" \
   -H "Content-Type: application/json" \
   -d '{
-    "upstream_owner": "fail2ban",
-    "upstream_repo": "fail2ban",
-    "my_owner": "my-github-user",
-    "my_repo": "my-forked-repo",
+    "base_config": {
+      "upstream_owner": "fail2ban",
+      "upstream_repo": "fail2ban",
+      "my_owner": "my-github-user",
+      "my_repo": "my-forked-repo"
+    },
+    "time_config": {
+      "check_interval": { "secs": 3600, "nanos": 0 },
+      "retry_interval": { "secs": 60, "nanos": 0 }
+    },
     "comparison_mode": "published_at",
-    "dispatch_token_secret": "MY_CUSTOM_TOKEN_VAR"
+    "dispatch_token_secret": "MY_CUSTOM_TOKEN_VAR",
+    "initial_delay": { "secs": 60, "nanos": 0 }
   }'
 ```
 
 **字段说明**:
-- `upstream_owner/repo`: 您想要监控的上游仓库。
-- `my_owner/repo`: 您想要触发更新的下游仓库（您自己的仓库）。
+- `base_config`: 基础配置
+  - `upstream_owner/repo`: 您想要监控的上游仓库。
+  - `my_owner/repo`: 您想要触发更新的下游仓库（您自己的仓库）。
+- `time_config`: 时间配置
+  - `check_interval`: 检查间隔（默认 1 小时）
+  - `retry_interval`: 失败重试间隔（默认 60 秒）
 - `comparison_mode`: (必填) `published_at` (推荐) 或 `updated_at`。
-- `dispatch_token_secret`: (可选) **重要更新**：此处需填写在 `wrangler` Secrets 或 Vars 中配置的变量名称（例如 `MY_CUSTOM_TOKEN_VAR`），而不是 Token 明文。如果不填，默认使用全局配置的 `MY_GITHUB_PAT`。
+- `dispatch_token_secret`: (可选) 在 Secrets 中配置的 Token 变量名。默认使用 `MY_GITHUB_PAT`。
+- `initial_delay`: 首次检查的延迟时间。
 
 ### 2. 查看监控列表 (GET)
 
@@ -207,25 +232,40 @@ curl -X DELETE https://verwatch.your-subdomain.workers.dev/api/projects/pop \
   }'
 ```
 
-### 4. 暂停/恢复监控 (POST)
+### 4. 切换监控状态 (POST)
 
-切换项目的暂停状态。暂停后，定时任务将跳过对该项目的检查。
+暂停或恢复指定项目的监控任务。
 
-- **Endpoint**: `POST /api/projects/toggle_pause`
-- **Response**: `200 OK` (Body: `true` 表示已暂停, `false` 表示运行中)
+- **Endpoint**: `POST /api/projects/switch`
+- **Header**: `X-Auth-Key: <您设置的 ADMIN_SECRET>`
 
 ```bash
-curl -X POST https://verwatch.your-subdomain.workers.dev/api/projects/toggle_pause \
+curl -X POST https://verwatch.your-subdomain.workers.dev/api/projects/switch \
   -H "X-Auth-Key: my_super_secure_password" \
   -H "Content-Type: application/json" \
   -d '{
-    "id": "fail2ban/fail2ban->my-github-user/my-forked-repo"
+    "unique_key": "fail2ban/fail2ban->my-github-user/my-forked-repo",
+    "paused": true
   }'
 ```
 
-### 5. 手动触发检查 (调试用)
+- `paused`: `true` 表示暂停监控，`false` 表示恢复运行。
 
-由于 Cloudflare Worker 的 Cron 触发器在开发环境较难测试，您可以等待定时任务执行，或者在本地使用 `wrangler dev --test-scheduled` 进行模拟。
+### 5. 手动触发检查 (POST)
+
+立即对指定项目执行一次版本检查，不影响原有的定时计划。
+
+- **Endpoint**: `POST /api/projects/trigger`
+- **Header**: `X-Auth-Key: <您设置的 ADMIN_SECRET>`
+
+```bash
+curl -X POST https://verwatch.your-subdomain.workers.dev/api/projects/trigger \
+  -H "X-Auth-Key: my_super_secure_password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "unique_key": "fail2ban/fail2ban->my-github-user/my-forked-repo"
+  }'
+```
 
 ## 🤖 下游仓库配置 (GitHub Actions)
 
@@ -271,6 +311,18 @@ wrangler dev
 ```bash
 cargo test
 ```
+
+## 🔄 架构变更说明 (v2)
+
+v2 版本进行了重大架构重构：
+
+| 变更项 | v1 (旧) | v2 (新) |
+|--------|---------|---------|
+| **核心设计** | 单一 ProjectStore DO 存储所有配置 | 分布式 ProjectMonitor DO，每个项目独立 |
+| **调度方式** | 中心化 Cron Job | 每个 Monitor 独立 Alarm 调度 |
+| **扩展性** | 受单 DO 性能限制 | 天然水平扩展 |
+| **配置存储** | ProjectStore 存储 Config | ProjectMonitor 自己存储 Config |
+| **注册表** | N/A | ProjectRegistry 管理注册关系 |
 
 ## 📄 License
 

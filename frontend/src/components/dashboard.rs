@@ -84,12 +84,12 @@ pub fn DashboardPage() -> impl IntoView {
         }
     };
 
-    let handle_toggle_pause = move |id: String| {
+    let handle_switch_monitor = move |id: String, paused: bool| {
         let state = auth_state.get();
         if let Some(api) = state.api.as_ref() {
             let api = api.clone();
             spawn_local(async move {
-                match api.toggle_pause_project(id.clone()).await {
+                match api.switch_monitor(id.clone(), paused).await {
                     Ok(new_paused_state) => {
                         set_notification.set(Some((
                             if new_paused_state {
@@ -99,14 +99,28 @@ pub fn DashboardPage() -> impl IntoView {
                             },
                             false,
                         )));
-                        set_projects.update(|list| {
-                            if let Some(p) = list.iter_mut().find(|p| p.unique_key == id) {
-                                p.paused = new_paused_state;
-                            }
-                        });
+                        // 重新加载列表以获取最新状态（包括 MonitorState 的详细信息）
+                        load_projects();
                     }
                     Err(e) => {
                         set_notification.set(Some((format!("切换状态失败: {}", e), true)));
+                    }
+                }
+            });
+        }
+    };
+
+    let handle_trigger_check = move |id: String| {
+        let state = auth_state.get();
+        if let Some(api) = state.api.as_ref() {
+            let api = api.clone();
+            spawn_local(async move {
+                match api.trigger_check(id.clone()).await {
+                    Ok(_) => {
+                        set_notification.set(Some(("检查已触发".to_string(), false)));
+                    }
+                    Err(e) => {
+                        set_notification.set(Some((format!("触发失败: {}", e), true)));
                     }
                 }
             });
@@ -147,7 +161,8 @@ pub fn DashboardPage() -> impl IntoView {
                     projects=projects
                     loading=loading_projects
                     on_refresh=Callback::new(move |_| load_projects())
-                    on_toggle_pause=Callback::new(handle_toggle_pause)
+                    on_switch_monitor=Callback::new(move |(id, p)| handle_switch_monitor(id, p))
+                    on_trigger_check=Callback::new(handle_trigger_check)
                     on_delete=Callback::new(handle_delete)
                 />
             </div>
@@ -230,7 +245,8 @@ fn ProjectsTable(
     projects: ReadSignal<Vec<ProjectConfig>>,
     loading: ReadSignal<bool>,
     on_refresh: Callback<()>,
-    on_toggle_pause: Callback<String>,
+    on_switch_monitor: Callback<(String, bool)>,
+    on_trigger_check: Callback<String>,
     on_delete: Callback<String>,
 ) -> impl IntoView {
     let total_monitors = move || projects.with(|p| p.len());
@@ -276,12 +292,13 @@ fn ProjectsTable(
                             </Show>
                             <For
                                 each=move || projects.get()
-                                key=|p| format!("{}|{}", p.unique_key, p.paused)
+                                key=|p| format!("{}|{}", p.unique_key, p.state.is_paused())
                                 children=move |project| {
                                     view! {
                                         <ProjectRow
                                             project=project
-                                            on_toggle_pause=on_toggle_pause
+                                            on_switch_monitor=on_switch_monitor
+                                            on_trigger_check=on_trigger_check
                                             on_delete=on_delete
                                         />
                                     }
@@ -305,11 +322,17 @@ struct ProjectRowDisplay {
 impl From<&ProjectConfig> for ProjectRowDisplay {
     fn from(p: &ProjectConfig) -> Self {
         Self {
-            upstream: format!("{} / {}", p.base.upstream_owner, p.base.upstream_repo),
-            target: format!("{} / {}", p.base.my_owner, p.base.my_repo),
-            mode: format!("{:?}", p.base.comparison_mode),
+            upstream: format!(
+                "{} / {}",
+                p.request.base_config.upstream_owner, p.request.base_config.upstream_repo
+            ),
+            target: format!(
+                "{} / {}",
+                p.request.base_config.my_owner, p.request.base_config.my_repo
+            ),
+            mode: format!("{:?}", p.request.comparison_mode),
             secret: p
-                .base
+                .request
                 .dispatch_token_secret
                 .clone()
                 .unwrap_or("全局".to_string()),
@@ -320,15 +343,16 @@ impl From<&ProjectConfig> for ProjectRowDisplay {
 #[component]
 fn ProjectRow(
     project: ProjectConfig,
-    on_toggle_pause: Callback<String>,
+    on_switch_monitor: Callback<(String, bool)>,
+    on_trigger_check: Callback<String>,
     on_delete: Callback<String>,
 ) -> impl IntoView {
     let id = project.unique_key.clone();
-    let is_paused = project.paused;
+    let is_paused = project.state.is_paused();
     let display = ProjectRowDisplay::from(&project);
 
     // 预先克隆 ID 用于回调
-    let (id_pause, id_del) = (id.clone(), id.clone());
+    let (id_pause, id_check, id_del) = (id.clone(), id.clone(), id.clone());
 
     view! {
         <tr
@@ -368,11 +392,16 @@ fn ProjectRow(
                     </div>
                     <ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52">
                         <li>
-                            <a on:click=move |_| on_toggle_pause.run(id_pause.clone())>
+                            <a on:click=move |_| on_switch_monitor.run((id_pause.clone(), !is_paused))>
                                 <Show when=move || is_paused
                                         fallback=|| view! { <Pause attr:class="mr-2 h-4 w-4" /> "暂停监控" }>
                                         <Play attr:class="mr-2 h-4 w-4" /> "恢复监控"
                                 </Show>
+                            </a>
+                        </li>
+                        <li>
+                            <a on:click=move |_| on_trigger_check.run(id_check.clone())>
+                                <RefreshCw attr:class="mr-2 h-4 w-4" /> "立即触发检查"
                             </a>
                         </li>
                         <li>
