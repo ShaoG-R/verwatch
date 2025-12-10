@@ -4,7 +4,7 @@ use super::adapter::{
 };
 use super::protocol::*;
 use crate::error::Result;
-use std::future::Future;
+use crate::utils::rpc::{ApiRequest, RpcHandler};
 use verwatch_shared::ProjectConfig;
 use worker::*;
 
@@ -129,10 +129,6 @@ impl DurableObject for ProjectRegistry {
     }
 
     async fn fetch(&self, req: Request) -> worker::Result<Response> {
-        if req.method() != Method::Post {
-            return Response::error("Method Not Allowed", 405);
-        }
-
         let storage = WorkerRegistryStorage(self.state.storage());
         let env_adapter = WorkerEnv(&self.env);
 
@@ -146,45 +142,17 @@ impl DurableObject for ProjectRegistry {
         let path = req.path();
 
         match path.as_str() {
-            RegisterMonitorCmd::PATH => self.handle_req(req, |c| logic.register(c)).await,
-            UnregisterMonitorCmd::PATH => self.handle_req(req, |c| logic.unregister(c)).await,
-            ListMonitorsCmd::PATH => self.handle_req(req, |c| logic.list(c)).await,
-            IsRegisteredCmd::PATH => self.handle_req(req, |c| logic.is_registered(c)).await,
+            RegisterMonitorCmd::PATH => RpcHandler::handle(req, |c| logic.register(c)).await,
+            UnregisterMonitorCmd::PATH => RpcHandler::handle(req, |c| logic.unregister(c)).await,
+            ListMonitorsCmd::PATH => RpcHandler::handle(req, |c| logic.list(c)).await,
+            IsRegisteredCmd::PATH => RpcHandler::handle(req, |c| logic.is_registered(c)).await,
             RegistrySwitchMonitorCmd::PATH => {
-                self.handle_req(req, |c| logic.switch_monitor(c)).await
+                RpcHandler::handle(req, |c| logic.switch_monitor(c)).await
             }
-            RegistryTriggerCheckCmd::PATH => self.handle_req(req, |c| logic.trigger_check(c)).await,
+            RegistryTriggerCheckCmd::PATH => {
+                RpcHandler::handle(req, |c| logic.trigger_check(c)).await
+            }
             _ => Response::error("Not Found", 404),
-        }
-    }
-}
-
-impl ProjectRegistry {
-    /// 统一的请求处理辅助函数
-    async fn handle_req<T, F, Fut>(&self, mut req: Request, handler: F) -> worker::Result<Response>
-    where
-        T: ApiRequest,
-        F: FnOnce(T) -> Fut,
-        Fut: Future<Output = Result<T::Response>>,
-    {
-        // 健壮的 Body 解析：处理空 Body 对应 Unit Struct 的情况
-        let cmd: T = match req.json().await {
-            Ok(v) => v,
-            Err(_) => {
-                if std::mem::size_of::<T>() == 0 {
-                    unsafe { std::mem::zeroed() }
-                } else {
-                    return Response::error("Invalid JSON Body", 400);
-                }
-            }
-        };
-
-        match handler(cmd).await {
-            Ok(result) => Response::from_json(&result),
-            Err(e) => {
-                let status = e.status_code();
-                Response::error(e.to_string(), status)
-            }
         }
     }
 }

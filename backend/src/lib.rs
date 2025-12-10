@@ -8,6 +8,7 @@ mod repository;
 pub(crate) mod utils {
     pub mod github;
     pub mod request;
+    pub mod rpc;
 }
 
 use error::AppError;

@@ -6,7 +6,7 @@ use super::protocol::*;
 // 引入外部依赖
 use crate::utils::github::gateway::GitHubGateway;
 use crate::utils::request::{HttpClient, WorkerHttpClient};
-use std::future::Future;
+use crate::utils::rpc::{ApiRequest, RpcHandler};
 use std::time::Duration;
 use verwatch_shared::chrono::{Duration as ChronoDuration, Utc};
 use verwatch_shared::{MonitorState, ProjectConfig};
@@ -284,21 +284,17 @@ impl DurableObject for ProjectMonitor {
     }
 
     async fn fetch(&self, req: Request) -> worker::Result<Response> {
-        if req.method() != Method::Post {
-            return Response::error("ProjectMonitor fetch: Method Not Allowed", 405);
-        }
-
         let storage = WorkerStorage(self.state.storage());
         let env = WorkerEnv(&self.env);
         let logic = ProjectMonitorLogic::new(storage, env, WorkerHttpClient);
         let path = req.path();
 
         match path.as_str() {
-            SetupMonitorCmd::PATH => self.handle_req(req, |c| logic.setup(c)).await,
-            StopMonitorCmd::PATH => self.handle_req(req, |c| logic.stop(c)).await,
-            TriggerCheckCmd::PATH => self.handle_req(req, |c| logic.trigger(c)).await,
-            GetConfigCmd::PATH => self.handle_req(req, |c| logic.get_config(c)).await,
-            SwitchMonitorCmd::PATH => self.handle_req(req, |c| logic.switch_monitor(c)).await,
+            SetupMonitorCmd::PATH => RpcHandler::handle(req, |c| logic.setup(c)).await,
+            StopMonitorCmd::PATH => RpcHandler::handle(req, |c| logic.stop(c)).await,
+            TriggerCheckCmd::PATH => RpcHandler::handle(req, |c| logic.trigger(c)).await,
+            GetConfigCmd::PATH => RpcHandler::handle(req, |c| logic.get_config(c)).await,
+            SwitchMonitorCmd::PATH => RpcHandler::handle(req, |c| logic.switch_monitor(c)).await,
             _ => Response::error("Not Found", 404),
         }
     }
@@ -315,37 +311,6 @@ impl DurableObject for ProjectMonitor {
         }
 
         Response::ok("Ack")
-    }
-}
-
-impl ProjectMonitor {
-    /// 统一的请求处理辅助函数
-    async fn handle_req<T, F, Fut>(&self, mut req: Request, handler: F) -> worker::Result<Response>
-    where
-        T: ApiRequest,
-        F: FnOnce(T) -> Fut,
-        Fut: Future<Output = Result<T::Response>>,
-    {
-        // 健壮的 Body 解析：处理空 Body 对应 Unit Struct 的情况
-        let cmd: T = match req.json().await {
-            Ok(v) => v,
-            Err(_) => {
-                if std::mem::size_of::<T>() == 0 {
-                    unsafe { std::mem::zeroed() }
-                } else {
-                    return Response::error("Invalid JSON Body", 400);
-                }
-            }
-        };
-
-        match handler(cmd).await {
-            Ok(result) => Response::from_json(&result),
-            Err(e) => {
-                // 将 AppError 映射为 HTTP 状态码
-                let status = e.status_code();
-                Response::error(e.to_string(), status)
-            }
-        }
     }
 }
 

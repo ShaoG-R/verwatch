@@ -1,13 +1,6 @@
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use crate::utils::rpc::ApiRequest;
+use serde::{Deserialize, Serialize};
 use verwatch_shared::ProjectConfig;
-
-/// 定义请求与响应的绑定关系
-pub trait ApiRequest: Serialize + DeserializeOwned {
-    /// 该请求对应的响应类型
-    type Response: Serialize + DeserializeOwned;
-    /// DO 内部路由路径
-    const PATH: &'static str;
-}
 
 // =========================================================
 // Registry 指令定义

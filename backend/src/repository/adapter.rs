@@ -1,11 +1,11 @@
-use crate::error::{AppError, Result};
+use crate::error::Result;
 use crate::project::protocol::{
-    ApiRequest, GetConfigCmd, SetupMonitorCmd, StopMonitorCmd, SwitchMonitorCmd, TriggerCheckCmd,
+    GetConfigCmd, SetupMonitorCmd, StopMonitorCmd, SwitchMonitorCmd, TriggerCheckCmd,
 };
+use crate::utils::rpc::{ApiRequest, RpcClient};
 use async_trait::async_trait;
 use verwatch_shared::ProjectConfig;
-use worker::wasm_bindgen::JsValue;
-use worker::{Env, Headers, Request, RequestInit, Response};
+use worker::Env;
 
 // =========================================================
 // 抽象存储接口
@@ -129,56 +129,17 @@ impl<'a> WorkerMonitorClient<'a> {
         Ok(id.get_stub()?)
     }
 
-    async fn send_internal<T: ApiRequest>(&self, unique_key: &str, cmd: &T) -> Result<Response> {
+    async fn send<T: ApiRequest>(&self, unique_key: &str, cmd: &T) -> Result<T::Response> {
         let stub = self.get_stub(unique_key)?;
-
-        let body = serde_json::to_string(cmd)?;
-        let headers = Headers::new();
-        headers.set("Content-Type", "application/json")?;
-
-        let mut init = RequestInit::new();
-        init.with_method(worker::Method::Post).with_headers(headers);
-        init.with_body(Some(JsValue::from_str(&body)));
-
-        let url = format!("http://monitor{}", T::PATH);
-        let request = Request::new_with_init(&url, &init)?;
-
-        let response = stub.fetch_with_request(request).await?;
-
-        if response.status_code() != 200 {
-            return Err(AppError::Store(format!(
-                "Monitor Error: {}",
-                response.status_code()
-            )));
-        }
-
-        Ok(response)
-    }
-
-    async fn send_request_no_response<T: ApiRequest>(
-        &self,
-        unique_key: &str,
-        cmd: &T,
-    ) -> Result<()> {
-        self.send_internal(unique_key, cmd).await?;
-        Ok(())
-    }
-
-    async fn send_request_with_response<T: ApiRequest>(
-        &self,
-        unique_key: &str,
-        cmd: &T,
-    ) -> Result<T::Response> {
-        let mut response = self.send_internal(unique_key, cmd).await?;
-        let data = response.json::<T::Response>().await?;
-        Ok(data)
+        let client = RpcClient::new(stub, "http://monitor");
+        client.send(cmd).await
     }
 }
 
 #[async_trait(?Send)]
 impl<'a> MonitorClient for WorkerMonitorClient<'a> {
     async fn setup(&self, unique_key: &str, config: &ProjectConfig) -> Result<()> {
-        self.send_request_no_response(
+        self.send(
             unique_key,
             &SetupMonitorCmd {
                 config: config.clone(),
@@ -188,23 +149,19 @@ impl<'a> MonitorClient for WorkerMonitorClient<'a> {
     }
 
     async fn stop(&self, unique_key: &str) -> Result<()> {
-        self.send_request_no_response(unique_key, &StopMonitorCmd)
-            .await
+        self.send(unique_key, &StopMonitorCmd).await
     }
 
     async fn get_config(&self, unique_key: &str) -> Result<Option<ProjectConfig>> {
-        self.send_request_with_response(unique_key, &GetConfigCmd)
-            .await
+        self.send(unique_key, &GetConfigCmd).await
     }
 
     async fn switch(&self, unique_key: &str, paused: bool) -> Result<()> {
-        self.send_request_no_response(unique_key, &SwitchMonitorCmd { paused })
-            .await
+        self.send(unique_key, &SwitchMonitorCmd { paused }).await
     }
 
     async fn trigger_check(&self, unique_key: &str) -> Result<()> {
-        self.send_request_no_response(unique_key, &TriggerCheckCmd)
-            .await
+        self.send(unique_key, &TriggerCheckCmd).await
     }
 }
 

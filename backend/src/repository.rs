@@ -2,10 +2,11 @@ pub mod adapter;
 pub mod protocol;
 mod registry;
 
-use crate::error::{AppError, Result};
+use crate::error::Result;
+use crate::utils::rpc::{ApiRequest, RpcClient};
 use protocol::*;
 use verwatch_shared::ProjectConfig;
-use worker::{wasm_bindgen::JsValue, *};
+use worker::Env;
 
 // =========================================================
 // Registry Trait (面向 ProjectRegistry DO)
@@ -32,7 +33,7 @@ pub trait Registry {
 // =========================================================
 
 pub struct DoProjectRegistry {
-    stub: Stub,
+    client: RpcClient,
 }
 
 impl DoProjectRegistry {
@@ -41,41 +42,14 @@ impl DoProjectRegistry {
         // Registry 是单例，使用固定 ID
         let id = namespace.id_from_name("default")?;
         let stub = id.get_stub()?;
-        Ok(Self { stub })
+        // Registry DO base URL
+        let client = RpcClient::new(stub, "http://registry");
+        Ok(Self { client })
     }
 
     /// 核心泛型方法：执行 RPC 请求
     async fn execute<T: ApiRequest>(&self, req: T) -> Result<T::Response> {
-        // 1. 序列化请求
-        let body = serde_json::to_string(&req)?;
-
-        // 2. 构造 Request
-        let headers = Headers::new();
-        headers.set("Content-Type", "application/json")?;
-
-        let mut init = RequestInit::new();
-        init.with_method(Method::Post).with_headers(headers);
-        init.with_body(Some(JsValue::from_str(&body)));
-
-        let url = format!("http://registry{}", T::PATH);
-        let request = Request::new_with_init(&url, &init)?;
-
-        // 3. 发送请求
-        let mut response = self.stub.fetch_with_request(request).await?;
-
-        // 4. 处理 DO 内部逻辑错误
-        if response.status_code() != 200 {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(AppError::Store(format!(
-                "Registry Error [{}]: {}",
-                response.status_code(),
-                error_text
-            )));
-        }
-
-        // 5. 反序列化响应
-        let data = response.json::<T::Response>().await?;
-        Ok(data)
+        self.client.send(&req).await
     }
 }
 

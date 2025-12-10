@@ -1,10 +1,6 @@
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use crate::utils::rpc::ApiRequest;
+use serde::{Deserialize, Serialize};
 use verwatch_shared::ProjectConfig;
-
-pub trait ApiRequest: Serialize + DeserializeOwned {
-    type Response: Serialize + DeserializeOwned;
-    const PATH: &'static str;
-}
 
 // =========================================================
 // 指令定义
