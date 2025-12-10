@@ -1,5 +1,6 @@
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
 use worker::wasm_bindgen::JsValue;
 
 /// Application Domain Errors
@@ -21,6 +22,34 @@ pub enum AppError {
     ExternalApi(String),
     /// 409: 资源冲突 (如尝试创建已存在的 ID)
     Conflict(String),
+}
+
+/// 用于在 HTTP Header 中标识该 Response Body 是一个 ErrorResponse
+pub const RPC_ERROR_HEADER: &str = "X-Rpc-Error";
+
+/// 专用于传输的错误类型
+///
+/// 这个类型完全独立于 AppError，设计用于：
+/// 1. 携带完整的错误上下文（状态码、错误码、消息）
+/// 2. 序列化为 JSON 字符串并作为 Response body 返回
+/// 3. 从 Response body 中恢复并转回 AppError
+///
+/// 这样可以绕过 worker::Error 信息不足的限制，实现跨 Worker/DO 的强类型错误传播
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ErrorResponse {
+    pub status: u16,
+    pub code: String,
+    pub message: String,
+}
+
+impl ErrorResponse {
+    pub fn new(status: u16, code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            code: code.into(),
+            message: message.into(),
+        }
+    }
 }
 
 impl AppError {
@@ -53,6 +82,19 @@ impl AppError {
             AppError::ExternalApi(_) => "UPSTREAM_ERROR",
         }
     }
+
+    /// 获取错误消息
+    pub fn message(&self) -> String {
+        match self {
+            AppError::Store(msg) => msg.clone(),
+            AppError::NotFound(msg) => msg.clone(),
+            AppError::InvalidInput(msg) => msg.clone(),
+            AppError::Unauthorized(msg) => msg.clone(),
+            AppError::Serialization(msg) => msg.clone(),
+            AppError::ExternalApi(msg) => msg.clone(),
+            AppError::Conflict(msg) => msg.clone(),
+        }
+    }
 }
 
 impl fmt::Display for AppError {
@@ -77,8 +119,34 @@ pub type Result<T> = std::result::Result<T, AppError>;
 
 impl From<worker::Error> for AppError {
     fn from(e: worker::Error) -> Self {
-        // worker::Error 比较宽泛，统一归类为 Store/Infrastructure 错误
         AppError::Store(e.to_string())
+    }
+}
+
+impl From<AppError> for ErrorResponse {
+    fn from(e: AppError) -> Self {
+        Self {
+            status: e.status_code(),
+            code: e.error_code().to_string(),
+            message: e.message(),
+        }
+    }
+}
+
+impl From<ErrorResponse> for AppError {
+    fn from(e: ErrorResponse) -> Self {
+        // 根据 code 还原回具体的 AppError 变体
+        // 这里的还原是“尽力而为”，因为 AppError(String) 只能携带消息
+        match e.code.as_str() {
+            "INVALID_INPUT" => AppError::InvalidInput(e.message),
+            "JSON_PARSE_ERROR" => AppError::Serialization(e.message),
+            "UNAUTHORIZED" => AppError::Unauthorized(e.message),
+            "RESOURCE_NOT_FOUND" => AppError::NotFound(e.message),
+            "RESOURCE_CONFLICT" => AppError::Conflict(e.message),
+            "INTERNAL_STORE_ERROR" => AppError::Store(e.message),
+            "UPSTREAM_ERROR" => AppError::ExternalApi(e.message),
+            _ => AppError::Store(format!("[{}] {}", e.code, e.message)),
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 use crate::error::{AppError, Result};
+
 use serde::{Serialize, de::DeserializeOwned};
 use std::future::Future;
 use worker::{Headers, Method, Request, RequestInit, Response, Stub, wasm_bindgen::JsValue};
@@ -57,7 +58,26 @@ impl RpcClient {
         // 5. 检查状态码
         if response.status_code() != 200 {
             let error_text = response.text().await.unwrap_or_default();
-            // 这里统一封装为 AppError::Store，保留原始 Status Code 信息
+
+            // 检查特定的 Header，以确定这是一个我们自己生成的结构化错误响应
+            // 这可以防止将普通的 HTTP 错误（如 Cloudflare 报错页面）误判为 JSON
+            let is_rpc_error = response
+                .headers()
+                .get(crate::error::RPC_ERROR_HEADER)
+                .ok()
+                .flatten()
+                .is_some();
+
+            if is_rpc_error {
+                // 尝试恢复为强类型 AppError
+                if let Ok(error_response) =
+                    serde_json::from_str::<crate::error::ErrorResponse>(&error_text)
+                {
+                    return Err(error_response.into());
+                }
+            }
+
+            // Fallback: 统一封装为 AppError::Store
             return Err(AppError::Store(format!(
                 "RPC Error [{}]: {}",
                 response.status_code(),
@@ -115,9 +135,23 @@ impl RpcHandler {
         match handler(cmd).await {
             Ok(result) => Response::from_json(&result),
             Err(e) => {
-                // 4. 错误处理：AppError -> HTTP Response
-                let status = e.status_code();
-                Response::error(e.to_string(), status)
+                // 4. 错误处理：将错误转换为 ErrorResponse 并作为 JSON 响应返回
+                // 这样客户端可以通过 Deserialize 还原回原始的 AppError (包含 Status Code 等)
+                use crate::error::{ErrorResponse, RPC_ERROR_HEADER};
+                let error_response: ErrorResponse = e.into();
+                let status = error_response.status;
+
+                match Response::from_json(&error_response) {
+                    Ok(mut resp) => {
+                        // 设置 Header 标识这是一个结构化错误响应
+                        // 客户端收到这个 Header 才会尝试解析 JSON ErrorResponse
+                        let _ = resp.headers_mut().set(RPC_ERROR_HEADER, "true");
+                        Ok(resp.with_status(status))
+                    }
+                    Err(serde_err) => {
+                        Response::error(format!("Failed to serialize error: {}", serde_err), 500)
+                    }
+                }
             }
         }
     }
