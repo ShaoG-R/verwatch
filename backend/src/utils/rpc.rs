@@ -95,20 +95,20 @@ impl RpcHandler {
         }
 
         // 2. 健壮的 Body 解析
-        // 处理空 Body 对应 Unit Struct 的情况
-        let cmd: T = match req.json().await {
+        let text = match req.text().await {
+            Ok(t) => t,
+            Err(e) => return Response::error(format!("Failed to read body: {}", e), 400),
+        };
+
+        let cmd_result = if text.trim().is_empty() {
+            serde_json::from_str("null")
+        } else {
+            serde_json::from_str(&text)
+        };
+
+        let cmd: T = match cmd_result {
             Ok(v) => v,
-            Err(_) => {
-                if std::mem::size_of::<T>() == 0 {
-                    // 对于 Unit Struct (比如 StopMonitorCmd)，允许空 Body
-                    // 使用 unsafe zeroed 是 Rust 中创建 Unit Struct 的一种 hack，
-                    // 但更安全的是依赖 serde_json 对 null 或 empty 的处理。
-                    // 原有代码使用了该逻辑，保留以兼容。
-                    unsafe { std::mem::zeroed() }
-                } else {
-                    return Response::error("Invalid JSON Body", 400);
-                }
-            }
+            Err(e) => return Response::error(format!("Invalid JSON Body: {}", e), 400),
         };
 
         // 3. 调用业务 Handler
