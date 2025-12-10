@@ -284,6 +284,10 @@ impl DurableObject for ProjectMonitor {
     }
 
     async fn fetch(&self, req: Request) -> worker::Result<Response> {
+        if req.method() != Method::Post {
+            return Response::error("ProjectMonitor fetch: Method Not Allowed", 405);
+        }
+
         let storage = WorkerStorage(self.state.storage());
         let env = WorkerEnv(&self.env);
         let logic = ProjectMonitorLogic::new(storage, env, WorkerHttpClient);

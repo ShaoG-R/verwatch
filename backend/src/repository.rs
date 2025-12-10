@@ -54,11 +54,8 @@ impl DoProjectRegistry {
         headers.set("Content-Type", "application/json")?;
 
         let mut init = RequestInit::new();
-        init.with_method(T::METHOD).with_headers(headers);
-
-        if T::METHOD != Method::Get && T::METHOD != Method::Head {
-            init.with_body(Some(JsValue::from_str(&body)));
-        }
+        init.with_method(Method::Post).with_headers(headers);
+        init.with_body(Some(JsValue::from_str(&body)));
 
         let url = format!("http://registry{}", T::PATH);
         let request = Request::new_with_init(&url, &init)?;

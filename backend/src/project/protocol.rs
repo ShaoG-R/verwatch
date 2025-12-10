@@ -1,11 +1,9 @@
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use verwatch_shared::ProjectConfig;
-use worker::Method;
 
 pub trait ApiRequest: Serialize + DeserializeOwned {
     type Response: Serialize + DeserializeOwned;
     const PATH: &'static str;
-    const METHOD: Method = Method::Post;
 }
 
 // =========================================================
@@ -21,7 +19,6 @@ pub struct SetupMonitorCmd {
 impl ApiRequest for SetupMonitorCmd {
     type Response = ();
     const PATH: &'static str = "/monitor/setup";
-    const METHOD: Method = Method::Post;
 }
 
 /// 停止监控 (Stop)
@@ -32,7 +29,6 @@ pub struct StopMonitorCmd;
 impl ApiRequest for StopMonitorCmd {
     type Response = ();
     const PATH: &'static str = "/monitor/stop";
-    const METHOD: Method = Method::Delete;
 }
 
 /// 手动触发检查 (Trigger)
@@ -43,7 +39,6 @@ pub struct TriggerCheckCmd;
 impl ApiRequest for TriggerCheckCmd {
     type Response = ();
     const PATH: &'static str = "/monitor/trigger";
-    const METHOD: Method = Method::Post;
 }
 
 /// 获取当前配置
@@ -53,7 +48,6 @@ pub struct GetConfigCmd;
 impl ApiRequest for GetConfigCmd {
     type Response = Option<ProjectConfig>;
     const PATH: &'static str = "/monitor/config";
-    const METHOD: Method = Method::Get;
 }
 
 /// 切换监控启停状态
@@ -65,5 +59,4 @@ pub struct SwitchMonitorCmd {
 impl ApiRequest for SwitchMonitorCmd {
     type Response = ();
     const PATH: &'static str = "/monitor/switch";
-    const METHOD: Method = Method::Post;
 }

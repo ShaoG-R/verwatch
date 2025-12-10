@@ -129,6 +129,10 @@ impl DurableObject for ProjectRegistry {
     }
 
     async fn fetch(&self, req: Request) -> worker::Result<Response> {
+        if req.method() != Method::Post {
+            return Response::error("Method Not Allowed", 405);
+        }
+
         let storage = WorkerRegistryStorage(self.state.storage());
         let env_adapter = WorkerEnv(&self.env);
 

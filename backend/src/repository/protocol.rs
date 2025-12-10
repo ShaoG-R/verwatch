@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use verwatch_shared::ProjectConfig;
-use worker::Method;
 
 /// 定义请求与响应的绑定关系
 pub trait ApiRequest: Serialize + DeserializeOwned {
@@ -8,8 +7,6 @@ pub trait ApiRequest: Serialize + DeserializeOwned {
     type Response: Serialize + DeserializeOwned;
     /// DO 内部路由路径
     const PATH: &'static str;
-    /// 建议的 HTTP 方法
-    const METHOD: Method = Method::Post;
 }
 
 // =========================================================
@@ -26,7 +23,6 @@ pub struct RegisterMonitorCmd {
 impl ApiRequest for RegisterMonitorCmd {
     type Response = String; // 返回 unique_key
     const PATH: &'static str = "/registry/register";
-    const METHOD: Method = Method::Post;
 }
 
 /// 注销一个 ProjectMonitor
@@ -39,7 +35,6 @@ pub struct UnregisterMonitorCmd {
 impl ApiRequest for UnregisterMonitorCmd {
     type Response = bool;
     const PATH: &'static str = "/registry/unregister";
-    const METHOD: Method = Method::Delete;
 }
 
 /// 获取所有已注册的 Monitor 的 ProjectConfig 列表
@@ -50,7 +45,6 @@ pub struct ListMonitorsCmd;
 impl ApiRequest for ListMonitorsCmd {
     type Response = Vec<ProjectConfig>;
     const PATH: &'static str = "/registry/list";
-    const METHOD: Method = Method::Get;
 }
 
 /// 检查某个 Monitor 是否已注册
@@ -62,7 +56,6 @@ pub struct IsRegisteredCmd {
 impl ApiRequest for IsRegisteredCmd {
     type Response = bool;
     const PATH: &'static str = "/registry/exists";
-    const METHOD: Method = Method::Get;
 }
 
 /// 切换 Monitor 监控状态 (Start/Stop)
@@ -75,7 +68,6 @@ pub struct RegistrySwitchMonitorCmd {
 impl ApiRequest for RegistrySwitchMonitorCmd {
     type Response = bool;
     const PATH: &'static str = "/registry/switch";
-    const METHOD: Method = Method::Post;
 }
 
 /// 手动触发 Monitor 检查
@@ -87,5 +79,4 @@ pub struct RegistryTriggerCheckCmd {
 impl ApiRequest for RegistryTriggerCheckCmd {
     type Response = bool; // 指示触发命令是否成功发送
     const PATH: &'static str = "/registry/trigger";
-    const METHOD: Method = Method::Post;
 }
