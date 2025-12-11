@@ -1883,12 +1883,9 @@ dependencies = [
  "gloo-net",
  "gloo-storage",
  "gloo-timers",
- "js-sys",
  "leptos",
  "leptos_router",
- "serde",
  "verwatch-shared",
- "wasm-bindgen",
 ]
 
 [[package]]

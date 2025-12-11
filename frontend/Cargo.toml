@@ -9,8 +9,5 @@ leptos_router = { version = "0.8.10" }
 gloo-net = "0.6"
 gloo-storage = "0.3"
 gloo-timers = "0.3"
-js-sys = "0.3"
-wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
 verwatch-shared = { path = "../shared" }
-serde = { version = "1.0.228", features = ["derive"] }
