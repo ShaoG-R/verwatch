@@ -14,9 +14,14 @@
         href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap"
         rel="stylesheet">
 
-    <!-- Tailwind CSS V4 & DaisyUI 5 (downloaded at build time) -->
-    <link data-trunk rel="css" href="https://cdn.jsdelivr.net/npm/daisyui@5/daisyui.css" />
-    <script data-trunk src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <!-- Tailwind CSS V4 & DaisyUI 5 (bundled at build time)
+         Original sources:
+         - https://cdn.jsdelivr.net/npm/daisyui@5/daisyui.css
+         - https://unpkg.com/@tailwindcss/browser@4
+    -->
+    <link data-trunk rel="css" href="assets/daisyui.css" />
+    <link data-trunk rel="copy-file" href="assets/tailwind.js" />
+    <script src="tailwind.js"></script>
 
     <link data-trunk rel="rust" data-wasm-opt="z" />
     <style>
