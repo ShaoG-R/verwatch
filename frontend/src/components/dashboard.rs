@@ -2,7 +2,7 @@ use crate::api::VerWatchApi;
 use crate::auth::{AuthContext, logout, use_auth};
 use crate::components::add_project_dialog::AddProjectDialog;
 use crate::components::icons::*;
-use gloo_timers::callback::Interval;
+use crate::web::Interval;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::hooks::use_navigate;

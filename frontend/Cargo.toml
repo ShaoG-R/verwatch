@@ -6,15 +6,25 @@ edition = "2024"
 [dependencies]
 leptos = { version = "0.8", features = ["csr"] }
 leptos_router = { version = "0.8.10" }
-gloo-net = { version = "0.6", default-features = false, features = ["http"] }
-gloo-storage = "0.3"
-gloo-timers = "0.3"
 console_error_panic_hook = "0.1"
 verwatch-shared = { path = "../shared" }
 lol_alloc = "0.4"
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
 serde-json-wasm = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+
+# Web API 封装所需
+[dependencies.web-sys]
+version = "0.3"
+features = [
+    "Window",
+    "Storage",
+    "Headers",
+    "Request",
+    "RequestInit",
+    "Response",
+]
 
 # =============================================================================
 # WASM 体积优化配置

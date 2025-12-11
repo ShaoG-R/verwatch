@@ -1,5 +1,6 @@
 mod api;
 mod auth;
+mod web;
 mod components {
     mod add_project_dialog;
     pub mod dashboard;

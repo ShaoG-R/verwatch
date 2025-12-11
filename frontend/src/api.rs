@@ -1,4 +1,4 @@
-use gloo_net::http::Request;
+use crate::web::HttpClient;
 use serde::{Deserialize, Serialize};
 
 use verwatch_shared::{
@@ -16,7 +16,7 @@ fn from_json<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, String> {
     serde_json_wasm::from_str(text).map_err(|e| e.to_string())
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct VerWatchApi {
     pub base_url: String,
     pub secret: String,
@@ -36,16 +36,11 @@ impl VerWatchApi {
         }
     }
 
-    // 认证头
-    fn auth_header(&self) -> (&str, &str) {
-        ("X-Auth-Key", &self.secret)
-    }
-
     /// 获取项目列表
     pub async fn get_projects(&self) -> Result<Vec<ProjectConfig>, String> {
         let url = self.url("/api/projects");
-        let res = Request::get(&url)
-            .header(self.auth_header().0, self.auth_header().1)
+        let res = HttpClient::get(&url)
+            .header("X-Auth-Key", &self.secret)
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -62,11 +57,10 @@ impl VerWatchApi {
     pub async fn add_project(&self, config: CreateProjectRequest) -> Result<ProjectConfig, String> {
         let url = self.url("/api/projects");
         let body = to_json(&config)?;
-        let res = Request::post(&url)
-            .header(self.auth_header().0, self.auth_header().1)
+        let res = HttpClient::post(&url)
+            .header("X-Auth-Key", &self.secret)
             .header("Content-Type", "application/json")
             .body(body)
-            .map_err(|e| e.to_string())?
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -84,11 +78,10 @@ impl VerWatchApi {
         let url = self.url("/api/projects");
         let target = DeleteTarget { id };
         let body = to_json(&target)?;
-        let res = Request::delete(&url)
-            .header(self.auth_header().0, self.auth_header().1)
+        let res = HttpClient::delete(&url)
+            .header("X-Auth-Key", &self.secret)
             .header("Content-Type", "application/json")
             .body(body)
-            .map_err(|e| e.to_string())?
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -106,11 +99,10 @@ impl VerWatchApi {
         let url = self.url("/api/projects/pop");
         let target = PopProjectRequest { id };
         let body = to_json(&target)?;
-        let res = Request::delete(&url)
-            .header(self.auth_header().0, self.auth_header().1)
+        let res = HttpClient::delete(&url)
+            .header("X-Auth-Key", &self.secret)
             .header("Content-Type", "application/json")
             .body(body)
-            .map_err(|e| e.to_string())?
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -128,11 +120,10 @@ impl VerWatchApi {
         let url = self.url("/api/projects/switch");
         let payload = SwitchMonitorRequest { unique_key, paused };
         let body = to_json(&payload)?;
-        let res = Request::post(&url)
-            .header(self.auth_header().0, self.auth_header().1)
+        let res = HttpClient::post(&url)
+            .header("X-Auth-Key", &self.secret)
             .header("Content-Type", "application/json")
             .body(body)
-            .map_err(|e| e.to_string())?
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -150,11 +141,10 @@ impl VerWatchApi {
         let url = self.url("/api/projects/trigger");
         let payload = TriggerCheckRequest { unique_key };
         let body = to_json(&payload)?;
-        let res = Request::post(&url)
-            .header(self.auth_header().0, self.auth_header().1)
+        let res = HttpClient::post(&url)
+            .header("X-Auth-Key", &self.secret)
             .header("Content-Type", "application/json")
             .body(body)
-            .map_err(|e| e.to_string())?
             .send()
             .await
             .map_err(|e| e.to_string())?;

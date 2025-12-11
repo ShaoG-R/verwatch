@@ -1,10 +1,10 @@
 use crate::api::VerWatchApi;
-use gloo_storage::{LocalStorage, Storage};
+use crate::web::LocalStorage;
 use leptos::prelude::*;
 
 const STORAGE_URL_KEY: &str = "verwatch_url";
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct AuthState {
     pub api: Option<VerWatchApi>,
     pub is_authenticated: bool,
@@ -27,7 +27,7 @@ pub fn init_auth(set_auth: WriteSignal<AuthState>) {
     set_auth.update(|state| {
         state.is_loading = false;
         // 尝试加载上次的 URL 方便输入，但状态仍未认证
-        if let Ok(url) = LocalStorage::get::<String>(STORAGE_URL_KEY) {
+        if let Some(url) = LocalStorage::get(STORAGE_URL_KEY) {
             state.backend_url = url;
         }
     });
@@ -40,10 +40,10 @@ pub async fn login(set_auth: WriteSignal<AuthState>, url: String, secret: String
     // 验证凭据是否有效
     if api.get_projects().await.is_ok() {
         // 成功：只保存 URL 到 LocalStorage 以便下次自动填充，但不保存 Secret
-        let _ = LocalStorage::set(STORAGE_URL_KEY, &url);
+        LocalStorage::set(STORAGE_URL_KEY, &url);
 
         // 确保清除旧的 Secret (如果存在)
-        let _ = LocalStorage::delete("verwatch_secret");
+        LocalStorage::delete("verwatch_secret");
 
         // 更新内存状态
         set_auth.update(|state| {
