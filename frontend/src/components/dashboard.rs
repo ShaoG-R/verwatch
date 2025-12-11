@@ -1,10 +1,13 @@
 use crate::auth::{AuthContext, logout, use_auth};
 use crate::components::add_project_dialog::AddProjectDialog;
 use crate::components::icons::*;
+use gloo_timers::callback::Interval;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::hooks::use_navigate;
-use verwatch_shared::{CreateProjectRequest, ProjectConfig};
+use std::cell::RefCell;
+use std::rc::Rc;
+use verwatch_shared::{CreateProjectRequest, MonitorState, ProjectConfig, chrono::Utc};
 
 #[component]
 pub fn DashboardPage() -> impl IntoView {
@@ -14,6 +17,8 @@ pub fn DashboardPage() -> impl IntoView {
     let (projects, set_projects) = signal(Vec::<ProjectConfig>::new());
     let (loading_projects, set_loading_projects) = signal(true);
     let (notification, set_notification) = signal(Option::<(String, bool)>::None);
+    // 用于触发倒计时刷新的信号 (每秒更新)
+    let (tick, set_tick) = signal(0u64);
 
     Effect::new({
         let navigate = navigate.clone();
@@ -46,6 +51,67 @@ pub fn DashboardPage() -> impl IntoView {
             load_projects();
         }
     });
+
+    // 每秒更新 tick 信号，用于驱动倒计时显示
+    let interval_handle: Rc<RefCell<Option<Interval>>> = Rc::new(RefCell::new(None));
+    {
+        let interval_handle = interval_handle.clone();
+        Effect::new(move |_| {
+            let state = auth_state.get();
+            if state.is_authenticated && !state.is_loading {
+                let interval = Interval::new(1000, move || {
+                    set_tick.update(|t| *t = t.wrapping_add(1));
+                });
+                *interval_handle.borrow_mut() = Some(interval);
+            } else {
+                // 未认证时清除定时器
+                *interval_handle.borrow_mut() = None;
+            }
+        });
+    }
+
+    // 记录上次自动刷新的时间戳，避免在短时间内重复刷新
+    let last_auto_refresh: Rc<RefCell<Option<i64>>> = Rc::new(RefCell::new(None));
+
+    // 监听 tick 和 projects，检查是否有项目倒计时已结束
+    {
+        let last_auto_refresh = last_auto_refresh.clone();
+        Effect::new(move |_| {
+            let _ = tick.get(); // 订阅 tick 更新
+            let projects_list = projects.get();
+            let now = Utc::now();
+            let now_ts = now.timestamp();
+
+            // 找出是否有已过期的 running 项目
+            let has_expired = projects_list.iter().any(|p| {
+                if let MonitorState::Running { next_check_at } = &p.state {
+                    *next_check_at <= now
+                } else {
+                    false
+                }
+            });
+
+            // 检查是否需要刷新：有过期项目且距离上次刷新超过 5 秒
+            let should_refresh = if has_expired && !loading_projects.get() {
+                let last_refresh = *last_auto_refresh.borrow();
+                match last_refresh {
+                    None => true,
+                    Some(ts) => now_ts - ts >= 5, // 至少间隔 5 秒
+                }
+            } else {
+                false
+            };
+
+            if should_refresh {
+                *last_auto_refresh.borrow_mut() = Some(now_ts);
+                // 延迟 0.5s 后刷新
+                set_timeout(
+                    move || load_projects(),
+                    std::time::Duration::from_millis(500),
+                );
+            }
+        });
+    }
 
     let handle_add_project = move |req: CreateProjectRequest| {
         let state = auth_state.get();
@@ -118,6 +184,8 @@ pub fn DashboardPage() -> impl IntoView {
                 match api.trigger_check(id.clone()).await {
                     Ok(_) => {
                         set_notification.set(Some(("检查已触发".to_string(), false)));
+                        // 重新加载列表以获取最新的倒计时信息
+                        load_projects();
                     }
                     Err(e) => {
                         set_notification.set(Some((format!("触发失败: {}", e), true)));
@@ -160,6 +228,7 @@ pub fn DashboardPage() -> impl IntoView {
                 <ProjectsTable
                     projects=projects
                     loading=loading_projects
+                    tick=tick
                     on_refresh=Callback::new(move |_| load_projects())
                     on_switch_monitor=Callback::new(move |(id, p)| handle_switch_monitor(id, p))
                     on_trigger_check=Callback::new(handle_trigger_check)
@@ -244,6 +313,7 @@ fn DashboardStats(total_monitors: Signal<usize>) -> impl IntoView {
 fn ProjectsTable(
     projects: ReadSignal<Vec<ProjectConfig>>,
     loading: ReadSignal<bool>,
+    tick: ReadSignal<u64>,
     on_refresh: Callback<()>,
     on_switch_monitor: Callback<(String, bool)>,
     on_trigger_check: Callback<String>,
@@ -271,7 +341,8 @@ fn ProjectsTable(
                                 <th>"上游"</th>
                                 <th>"目标"</th>
                                 <th class="hidden md:table-cell">"触发模式"</th>
-                                <th class="hidden md:table-cell">"密钥"</th>
+                                <th class="hidden md:table-cell">"下次检查"</th>
+                                <th class="hidden lg:table-cell">"密钥"</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -292,11 +363,20 @@ fn ProjectsTable(
                             </Show>
                             <For
                                 each=move || projects.get()
-                                key=|p| format!("{}|{}", p.unique_key, p.state.is_paused())
+                                key=|p| {
+                                    // 包含完整的状态信息，确保状态变化时重新渲染
+                                    match &p.state {
+                                        MonitorState::Paused => format!("{}|paused", p.unique_key),
+                                        MonitorState::Running { next_check_at } => {
+                                            format!("{}|running|{}", p.unique_key, next_check_at.timestamp())
+                                        }
+                                    }
+                                }
                                 children=move |project| {
                                     view! {
                                         <ProjectRow
                                             project=project
+                                            tick=tick
                                             on_switch_monitor=on_switch_monitor
                                             on_trigger_check=on_trigger_check
                                             on_delete=on_delete
@@ -343,13 +423,43 @@ impl From<&ProjectConfig> for ProjectRowDisplay {
 #[component]
 fn ProjectRow(
     project: ProjectConfig,
+    tick: ReadSignal<u64>,
     on_switch_monitor: Callback<(String, bool)>,
     on_trigger_check: Callback<String>,
     on_delete: Callback<String>,
 ) -> impl IntoView {
     let id = project.unique_key.clone();
     let is_paused = project.state.is_paused();
+    let state_for_countdown = project.state.clone();
+    let state_for_badge = project.state.clone();
     let display = ProjectRowDisplay::from(&project);
+
+    // 计算倒计时显示
+    let countdown_text = move || {
+        let _ = tick.get(); // 订阅 tick 以便每秒更新
+        match &state_for_countdown {
+            MonitorState::Paused => "--".to_string(),
+            MonitorState::Running { next_check_at } => {
+                let now = Utc::now();
+                let diff = *next_check_at - now;
+                let secs = diff.num_seconds();
+                if secs <= 0 {
+                    "即将刷新...".to_string()
+                } else {
+                    let hours = secs / 3600;
+                    let minutes = (secs % 3600) / 60;
+                    let seconds = secs % 60;
+                    if hours > 0 {
+                        format!("{}h {}m {}s", hours, minutes, seconds)
+                    } else if minutes > 0 {
+                        format!("{}m {}s", minutes, seconds)
+                    } else {
+                        format!("{}s", seconds)
+                    }
+                }
+            }
+        }
+    };
 
     // 预先克隆 ID 用于回调
     let (id_pause, id_check, id_del) = (id.clone(), id.clone(), id.clone());
@@ -382,7 +492,30 @@ fn ProjectRow(
                     {display.mode}
                 </div>
             </td>
-            <td class="hidden md:table-cell font-mono text-xs opacity-50">
+            <td class="hidden md:table-cell">
+                <div class=move || {
+                    let _ = tick.get();
+                    let base = "badge badge-sm font-mono";
+                    match &state_for_badge {
+                        MonitorState::Paused => format!("{} badge-ghost", base),
+                        MonitorState::Running { next_check_at } => {
+                            let now = Utc::now();
+                            let secs = (*next_check_at - now).num_seconds();
+                            if secs <= 60 {
+                                format!("{} badge-error animate-pulse", base)
+                            } else if secs <= 300 {
+                                format!("{} badge-warning", base)
+                            } else {
+                                format!("{} badge-info", base)
+                            }
+                        }
+                    }
+                }>
+                    <Clock attr:class="h-3 w-3 mr-1" />
+                    {countdown_text}
+                </div>
+            </td>
+            <td class="hidden lg:table-cell font-mono text-xs opacity-50">
                 {display.secret}
             </td>
             <td>
