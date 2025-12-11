@@ -37,7 +37,7 @@
 
 ## 🏗️ 系统架构
 
-```mermaid
+``` mermaid
 graph TD
     %% 样式定义
     classDef frontend fill:#fce4ec,stroke:#c2185b,stroke-width:2px,color:#000;
