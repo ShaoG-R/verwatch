@@ -29,6 +29,8 @@ jobs:
           file: frontend/Dockerfile
           push: false
           outputs: type=local,dest=./output
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
