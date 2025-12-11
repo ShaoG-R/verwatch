@@ -19,31 +19,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build with Arch Linux
+        uses: docker/build-push-action@v6
         with:
-          targets: wasm32-unknown-unknown
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: frontend
-          cache-targets: true
-          cache-on-failure: true
-
-      - name: Install binaryen (wasm-opt)
-        run: sudo apt-get update && sudo apt-get install -y binaryen
-
-      - name: Install Trunk and wasm-bindgen
-        run: cargo install trunk wasm-bindgen-cli --locked
-
-      - name: Build
-        working-directory: frontend
-        run: trunk build --release
+          context: .
+          file: frontend/Dockerfile
+          push: false
+          outputs: type=local,dest=./output
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           wranglerVersion: "4.53.0"
-          command: pages deploy frontend/dist --project-name=verwatch
+          command: pages deploy output/dist --project-name=verwatch
