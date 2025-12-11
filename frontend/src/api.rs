@@ -7,13 +7,16 @@ use verwatch_shared::{
 };
 
 // 辅助函数：序列化 JSON
+use verwatch_shared::serde_helper;
+
+// 辅助函数：序列化 JSON
 fn to_json<T: Serialize>(value: &T) -> Result<String, String> {
-    serde_json_wasm::to_string(value).map_err(|e| e.to_string())
+    serde_helper::to_json_string(value).map_err(|e| e.to_string())
 }
 
 // 辅助函数：反序列化 JSON
 fn from_json<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, String> {
-    serde_json_wasm::from_str(text).map_err(|e| e.to_string())
+    serde_helper::from_json_string(text).map_err(|e| e.to_string())
 }
 
 #[derive(Clone, PartialEq)]

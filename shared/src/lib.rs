@@ -13,6 +13,7 @@ pub use date::{Date, Timestamp};
 // =========================================================
 
 pub mod protocol;
+pub mod serde_helper;
 
 pub const PREFIX_VERSION: &str = "v:";
 pub const HEADER_AUTH_KEY: &str = "X-Auth-Key";

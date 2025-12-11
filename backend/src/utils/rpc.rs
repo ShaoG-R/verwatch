@@ -38,7 +38,7 @@ impl RpcClient {
     /// 发送强类型请求并获取解析后的响应
     pub async fn send<T: ApiRequest>(&self, req: &T) -> WatchResult<T::Response> {
         // 1. 序列化请求
-        let body = serde_json_wasm::to_string(req).map_err(|e| {
+        let body = verwatch_shared::serde_helper::to_json_string(req).map_err(|e| {
             WatchError::serialization(e.to_string()).in_op_with("rpc.serialize", T::PATH)
         })?;
 
@@ -79,8 +79,9 @@ impl RpcClient {
 
             if is_rpc_error {
                 // 尝试恢复为强类型 WatchError (已携带远端上下文)
-                if let Ok(error_response) =
-                    serde_json_wasm::from_str::<crate::error::ErrorResponse>(&error_text)
+                if let Ok(error_response) = verwatch_shared::serde_helper::from_json_string::<
+                    crate::error::ErrorResponse,
+                >(&error_text)
                 {
                     // 将远端错误转回 WatchError，并追加本地 RPC 调用上下文
                     return Err(WatchError::from(error_response).in_op_with("rpc.call", T::PATH));
@@ -132,9 +133,9 @@ impl RpcHandler {
         };
 
         let cmd_result = if text.trim().is_empty() {
-            serde_json_wasm::from_str("null")
+            verwatch_shared::serde_helper::from_json_string("null")
         } else {
-            serde_json_wasm::from_str(&text)
+            verwatch_shared::serde_helper::from_json_string(&text)
         };
 
         let cmd: T = match cmd_result {

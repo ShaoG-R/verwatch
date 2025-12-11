@@ -1306,12 +1306,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde-json-wasm"
-version = "1.0.1"
+name = "serde-wasm-bindgen"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f05da0d153dd4595bdffd5099dc0e9ce425b205ee648eb93437ff7302af8c9a5"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
 dependencies = [
+ "js-sys",
  "serde",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1742,7 +1744,6 @@ dependencies = [
  "leptos",
  "lol_alloc",
  "serde",
- "serde-json-wasm",
  "verwatch-shared",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -1755,6 +1756,7 @@ version = "0.1.0"
 dependencies = [
  "js-sys",
  "serde",
+ "serde-wasm-bindgen",
 ]
 
 [[package]]
