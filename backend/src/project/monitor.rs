@@ -8,8 +8,7 @@ use crate::utils::github::gateway::GitHubGateway;
 use crate::utils::request::{HttpClient, WorkerHttpClient};
 use crate::utils::rpc::{ApiRequest, RpcHandler};
 use std::time::Duration;
-use verwatch_shared::chrono::{Duration as ChronoDuration, Utc};
-use verwatch_shared::{MonitorState, ProjectConfig};
+use verwatch_shared::{Date, MonitorState, ProjectConfig};
 use worker::*;
 
 // =========================================================
@@ -79,7 +78,7 @@ where
         let delay = config.request.initial_delay;
 
         // 计算下一次检查时间
-        let next_check_at = Utc::now() + ChronoDuration::from_std(delay).unwrap_or_default();
+        let next_check_at = Date::now_timestamp() + delay;
         config.state = MonitorState::running(next_check_at);
 
         self.storage.put(STATE_KEY_CONFIG, &config).await?;
@@ -120,7 +119,7 @@ where
             self.storage.delete_alarm().await?;
         } else {
             // 恢复监控：立即开始
-            let next_check_at = Utc::now();
+            let next_check_at = Date::now_timestamp();
             config.state = MonitorState::running(next_check_at);
             self.storage.put(STATE_KEY_CONFIG, &config).await?;
             self.storage.set_alarm(Duration::from_millis(0)).await?;
@@ -178,8 +177,7 @@ where
         };
 
         // 5. 更新状态中的下一次检查时间
-        let next_check_at =
-            Utc::now() + ChronoDuration::from_std(next_interval).unwrap_or_default();
+        let next_check_at = Date::now_timestamp() + next_interval;
         config.state = MonitorState::running(next_check_at);
         self.storage.put(STATE_KEY_CONFIG, &config).await?;
 

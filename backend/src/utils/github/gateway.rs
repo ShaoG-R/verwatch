@@ -3,8 +3,7 @@ use crate::utils::github::release::{GitHubRelease, ReleaseTimestamp};
 use crate::utils::request::{HttpClient, HttpMethod, HttpRequest};
 use serde::Serialize;
 use serde_json::json;
-use verwatch_shared::chrono::{DateTime, Utc};
-use verwatch_shared::{ComparisonMode, ProjectConfig};
+use verwatch_shared::{ComparisonMode, Date, ProjectConfig};
 
 pub const GITHUB_API_VERSION: &str = "2022-11-28";
 const USER_AGENT: &str = "rust-watchdog-worker";
@@ -129,12 +128,10 @@ impl<'a, C: HttpClient> GitHubGateway<'a, C> {
                         WatchError::external_api("Missing 'published_at' field required by config")
                             .in_op_with("github.parse.published_at", &repo_path)
                     })?;
-                let t = DateTime::parse_from_rfc3339(s)
-                    .map_err(|e| {
-                        WatchError::external_api(format!("Invalid time format: {}", e))
-                            .in_op_with("github.parse.time", &repo_path)
-                    })?
-                    .with_timezone(&Utc);
+                let t = Date::parse_timestamp(s).ok_or_else(|| {
+                    WatchError::external_api("Invalid time format for 'published_at'")
+                        .in_op_with("github.parse.time", &repo_path)
+                })?;
                 ReleaseTimestamp::Published(t)
             }
             ComparisonMode::UpdatedAt => {
@@ -145,12 +142,10 @@ impl<'a, C: HttpClient> GitHubGateway<'a, C> {
                         WatchError::external_api("Missing 'updated_at' field required by config")
                             .in_op_with("github.parse.updated_at", &repo_path)
                     })?;
-                let t = DateTime::parse_from_rfc3339(s)
-                    .map_err(|e| {
-                        WatchError::external_api(format!("Invalid time format: {}", e))
-                            .in_op_with("github.parse.time", &repo_path)
-                    })?
-                    .with_timezone(&Utc);
+                let t = Date::parse_timestamp(s).ok_or_else(|| {
+                    WatchError::external_api("Invalid time format for 'updated_at'")
+                        .in_op_with("github.parse.time", &repo_path)
+                })?;
                 ReleaseTimestamp::Updated(t)
             }
         };

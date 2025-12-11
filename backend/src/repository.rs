@@ -152,7 +152,7 @@ pub mod tests {
                     config.state = verwatch_shared::MonitorState::Paused;
                 } else {
                     config.state = verwatch_shared::MonitorState::Running {
-                        next_check_at: verwatch_shared::chrono::Utc::now(),
+                        next_check_at: verwatch_shared::Date::now_timestamp(),
                     };
                 }
                 Ok(true)

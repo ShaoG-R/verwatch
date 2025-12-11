@@ -6,7 +6,7 @@ use gloo_timers::callback::Interval;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::hooks::use_navigate;
-use verwatch_shared::{CreateProjectRequest, MonitorState, ProjectConfig, chrono::Utc};
+use verwatch_shared::{CreateProjectRequest, Date, MonitorState, ProjectConfig};
 
 // --- Logic Layer: Dashboard Store ---
 
@@ -164,7 +164,7 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
         Effect::new(move |_| {
             let _ = cleanup_tick.get();
             let list = projects.get();
-            let now = Utc::now();
+            let now = Date::now_timestamp();
 
             // Allow refresh if any project is expired
             let needs_refresh = list.iter().any(|p| {
@@ -383,7 +383,7 @@ fn ProjectsTable() -> impl IntoView {
                                     match &p.state {
                                         MonitorState::Paused => format!("{}|paused", p.unique_key),
                                         MonitorState::Running { next_check_at } => {
-                                            format!("{}|running|{}", p.unique_key, next_check_at.timestamp())
+                                            format!("{}|running|{}", p.unique_key, next_check_at.as_millis_i64())
                                         }
                                     }
                                 }
@@ -442,9 +442,9 @@ fn ProjectRow(project: ProjectConfig) -> impl IntoView {
         match &state_for_countdown {
             MonitorState::Paused => "--".to_string(),
             MonitorState::Running { next_check_at } => {
-                let now = Utc::now();
+                let now = Date::now_timestamp();
                 let diff = *next_check_at - now;
-                let secs = diff.num_seconds();
+                let secs = diff.as_secs() as i64;
                 if secs <= 0 {
                     "即将刷新...".to_string()
                 } else {
@@ -500,8 +500,8 @@ fn ProjectRow(project: ProjectConfig) -> impl IntoView {
                     match &state_for_badge {
                         MonitorState::Paused => format!("{} badge-ghost", base),
                         MonitorState::Running { next_check_at } => {
-                            let now = Utc::now();
-                            let secs = (*next_check_at - now).num_seconds();
+                            let now = Date::now_timestamp();
+                            let secs = (*next_check_at - now).as_secs() as i64;
                             if secs <= 60 {
                                 format!("{} badge-error animate-pulse", base)
                             } else if secs <= 300 {

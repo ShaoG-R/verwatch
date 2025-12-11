@@ -1,9 +1,13 @@
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-pub use chrono;
+// =========================================================
+// 时间类型模块 (Date Types)
+// =========================================================
+
+mod date;
+pub use date::{Date, Timestamp};
 
 // =========================================================
 // 常量定义 (Constants)
@@ -39,8 +43,8 @@ impl Default for ComparisonMode {
 pub enum MonitorState {
     /// 监控已暂停
     Paused,
-    /// 监控运行中，next_check_at 为下一次检查的 ISO 8601 时间 (UTC)
-    Running { next_check_at: DateTime<Utc> },
+    /// 监控运行中，next_check_at 为下一次检查时间
+    Running { next_check_at: Timestamp },
 }
 
 impl Default for MonitorState {
@@ -55,9 +59,17 @@ impl MonitorState {
         matches!(self, MonitorState::Paused)
     }
 
-    /// 创建一个运行中状态，使用指定的下一次检查时间
-    pub fn running(next_check_at: DateTime<Utc>) -> Self {
+    /// 创建一个运行中状态
+    pub fn running(next_check_at: Timestamp) -> Self {
         MonitorState::Running { next_check_at }
+    }
+
+    /// 获取下一次检查时间（如果处于运行状态）
+    pub fn next_check_at(&self) -> Option<Timestamp> {
+        match self {
+            MonitorState::Running { next_check_at } => Some(*next_check_at),
+            MonitorState::Paused => None,
+        }
     }
 }
 

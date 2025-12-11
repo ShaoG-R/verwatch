@@ -1,18 +1,18 @@
 use crate::error::{WatchError, WatchResult};
 use serde::{Deserialize, Serialize};
-use verwatch_shared::chrono::{DateTime, Utc};
+use verwatch_shared::Timestamp;
 
 // =========================================================
 // 1. Enum & Struct
 // =========================================================
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum ReleaseTimestamp {
-    Published(DateTime<Utc>),
-    Updated(DateTime<Utc>),
+    Published(Timestamp),
+    Updated(Timestamp),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GitHubRelease {
     pub tag_name: String,
     pub timestamp: ReleaseTimestamp,
