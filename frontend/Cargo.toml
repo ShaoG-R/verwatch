@@ -11,3 +11,27 @@ gloo-storage = "0.3"
 gloo-timers = "0.3"
 console_error_panic_hook = "0.1"
 verwatch-shared = { path = "../shared" }
+
+[profile.release]
+# 1. 优化级别：
+# "s" = 优化体积 (Size)
+# "z" = 极致优化体积 (可能会牺牲一点点运行速度)
+opt-level = "z"
+
+# 2. 链接时优化 (Link Time Optimization)：
+# true/fat = 跨所有 crate 进行优化，体积显著减小，但编译变慢
+lto = true
+
+# 3. 代码生成单元：
+# 设置为 1 允许编译器一次性看到所有代码，最大化优化效果
+# 代价是无法并发编译，构建变慢
+codegen-units = 1
+
+# 4. Panic 策略：
+# "abort" = 发生 panic 直接终止，不进行栈展开 (Unwinding)
+# 这能省去大量处理错误回溯的代码
+panic = "abort"
+
+# 5. 剥离符号表 (Rust 1.59+ 原生支持)：
+# 移除调试符号，大幅减小体积
+strip = true
