@@ -31,8 +31,8 @@ jobs:
           cache-targets: true
           cache-on-failure: true
 
-      - name: Install Trunk
-        run: cargo install trunk --locked
+      - name: Install Trunk and wasm-bindgen
+        run: cargo install trunk wasm-bindgen-cli --locked
 
       - name: Build
         working-directory: frontend
