@@ -153,7 +153,7 @@ pub mod tests {
         async fn get<T: DeserializeOwned>(&self, key: &str) -> WatchResult<Option<T>> {
             let map = self.map.borrow();
             if let Some(val_str) = map.get(key) {
-                let val = serde_json::from_str(val_str)?;
+                let val = serde_json_wasm::from_str(val_str)?;
                 Ok(Some(val))
             } else {
                 Ok(None)
@@ -161,7 +161,7 @@ pub mod tests {
         }
 
         async fn put<T: Serialize>(&self, key: &str, value: &T) -> WatchResult<()> {
-            let val_str = serde_json::to_string(value)?;
+            let val_str = serde_json_wasm::to_string(value)?;
             self.map.borrow_mut().insert(key.to_string(), val_str);
             Ok(())
         }

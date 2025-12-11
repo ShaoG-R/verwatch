@@ -1,8 +1,7 @@
 use crate::error::{WatchError, WatchResult};
 use crate::utils::github::release::{GitHubRelease, ReleaseTimestamp};
 use crate::utils::request::{HttpClient, HttpMethod, HttpRequest};
-use serde::Serialize;
-use serde_json::json;
+use serde::{Deserialize, Serialize};
 use verwatch_shared::{ComparisonMode, Date, ProjectConfig};
 
 pub const GITHUB_API_VERSION: &str = "2022-11-28";
@@ -12,13 +11,23 @@ const USER_AGENT: &str = "rust-watchdog-worker";
 // 数据结构: DispatchEvent
 // =========================================================
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
+struct DispatchBody<'a> {
+    event_type: &'a str,
+    client_payload: ClientPayload<'a>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ClientPayload<'a> {
+    version: &'a str,
+}
+
 pub struct DispatchEvent<'a> {
     pub owner: &'a str,
     pub repo: &'a str,
     pub token: &'a str,
     pub event_type: &'a str,
-    pub client_payload: serde_json::Value,
+    pub version: &'a str,
 }
 
 impl<'a> DispatchEvent<'a> {
@@ -28,17 +37,19 @@ impl<'a> DispatchEvent<'a> {
             self.owner, self.repo
         );
 
-        let body = json!({
-            "event_type": self.event_type,
-            "client_payload": self.client_payload
-        });
+        let body = DispatchBody {
+            event_type: self.event_type,
+            client_payload: ClientPayload {
+                version: self.version,
+            },
+        };
 
         let req = HttpRequest::new(&url, HttpMethod::Post)
             .with_header("User-Agent", USER_AGENT)
             .with_header("Authorization", &format!("Bearer {}", self.token))
             .with_header("Accept", "application/vnd.github+json")
             .with_header("X-GitHub-Api-Version", GITHUB_API_VERSION)
-            .with_body(body);
+            .with_json_body(&body)?;
 
         let resp = client.send(req).await.map_err(|e| {
             e.in_op_with(
@@ -103,46 +114,40 @@ impl<'a, C: HttpClient> GitHubGateway<'a, C> {
             .in_op_with("github.fetch", &repo_path));
         }
 
-        // 手动解析 JSON Value
-        let root: serde_json::Value = resp
+        // 手动解析 JSON
+        #[derive(Deserialize)]
+        struct ReleaseResponse {
+            tag_name: String,
+            published_at: Option<String>,
+            updated_at: Option<String>,
+        }
+
+        let root: ReleaseResponse = resp
             .json()
             .map_err(|e| e.in_op_with("github.parse", &repo_path))?;
 
         // 1. 获取 tag_name
-        let tag_name = root
-            .get("tag_name")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                WatchError::external_api("Missing 'tag_name' in response")
-                    .in_op_with("github.parse.tag", &repo_path)
-            })?
-            .to_string();
+        let tag_name = root.tag_name;
 
         // 2. 根据 mode 获取对应时间字段，如果字段不存在则报错
         let timestamp = match self.mode {
             ComparisonMode::PublishedAt => {
-                let s = root
-                    .get("published_at")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        WatchError::external_api("Missing 'published_at' field required by config")
-                            .in_op_with("github.parse.published_at", &repo_path)
-                    })?;
-                let t = Date::parse_timestamp(s).ok_or_else(|| {
+                let s = root.published_at.ok_or_else(|| {
+                    WatchError::external_api("Missing 'published_at' field required by config")
+                        .in_op_with("github.parse.published_at", &repo_path)
+                })?;
+                let t = Date::parse_timestamp(&s).ok_or_else(|| {
                     WatchError::external_api("Invalid time format for 'published_at'")
                         .in_op_with("github.parse.time", &repo_path)
                 })?;
                 ReleaseTimestamp::Published(t)
             }
             ComparisonMode::UpdatedAt => {
-                let s = root
-                    .get("updated_at")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| {
-                        WatchError::external_api("Missing 'updated_at' field required by config")
-                            .in_op_with("github.parse.updated_at", &repo_path)
-                    })?;
-                let t = Date::parse_timestamp(s).ok_or_else(|| {
+                let s = root.updated_at.ok_or_else(|| {
+                    WatchError::external_api("Missing 'updated_at' field required by config")
+                        .in_op_with("github.parse.updated_at", &repo_path)
+                })?;
+                let t = Date::parse_timestamp(&s).ok_or_else(|| {
                     WatchError::external_api("Invalid time format for 'updated_at'")
                         .in_op_with("github.parse.time", &repo_path)
                 })?;
@@ -162,13 +167,12 @@ impl<'a, C: HttpClient> GitHubGateway<'a, C> {
         version: &str,
         token: &str,
     ) -> WatchResult<()> {
-        let payload = json!({ "version": version });
         let event = DispatchEvent {
             owner: &config.request.base_config.my_owner,
             repo: &config.request.base_config.my_repo,
             token,
             event_type: "upstream_update",
-            client_payload: payload,
+            version,
         };
         event.send(self.client).await
     }

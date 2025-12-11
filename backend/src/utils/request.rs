@@ -1,5 +1,5 @@
 use crate::error::{WatchError, WatchResult};
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 use std::time::Duration;
 use worker::{Delay, Fetch, Headers, Request, RequestInit, wasm_bindgen};
@@ -60,9 +60,12 @@ impl HttpRequest {
         self
     }
 
-    pub fn with_body(mut self, body: serde_json::Value) -> Self {
-        self.body = Some(body.to_string());
-        self
+    pub fn with_json_body<T: Serialize>(mut self, body: &T) -> WatchResult<Self> {
+        self.body = Some(
+            serde_json_wasm::to_string(body)
+                .map_err(|e| WatchError::serialization(e.to_string()))?,
+        );
+        Ok(self)
     }
 }
 
@@ -73,7 +76,7 @@ pub struct HttpResponse {
 
 impl HttpResponse {
     pub fn json<T: DeserializeOwned>(&self) -> WatchResult<T> {
-        serde_json::from_str(&self.body)
+        serde_json_wasm::from_str(&self.body)
             .map_err(|e| WatchError::serialization(e.to_string()).in_op("http.json"))
     }
 }

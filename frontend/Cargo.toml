@@ -6,13 +6,19 @@ edition = "2024"
 [dependencies]
 leptos = { version = "0.8", features = ["csr"] }
 leptos_router = { version = "0.8.10" }
-gloo-net = "0.6"
+gloo-net = { version = "0.6", default-features = false, features = ["http"] }
 gloo-storage = "0.3"
 gloo-timers = "0.3"
 console_error_panic_hook = "0.1"
 verwatch-shared = { path = "../shared" }
 lol_alloc = "0.4"
 wasm-bindgen = "0.2"
+serde-json-wasm = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+
+# =============================================================================
+# WASM 体积优化配置
+# =============================================================================
 
 [profile.release]
 # 1. 优化级别：
@@ -37,3 +43,32 @@ panic = "abort"
 # 5. 剥离符号表 (Rust 1.59+ 原生支持)：
 # 移除调试符号，大幅减小体积
 strip = true
+
+# 6. 禁用溢出检查：
+# Release 模式下禁用整数溢出检查，减少运行时检查代码
+overflow-checks = false
+
+# 7. 禁用增量编译：
+# 增量编译会保留中间产物，对最终优化有轻微负面影响
+incremental = false
+
+# 8. 禁用 debug 信息：
+# 确保没有任何调试信息被包含
+debug = false
+
+# =============================================================================
+# 开发配置 (保持快速编译)
+# =============================================================================
+
+[profile.dev]
+# 开发模式使用较低优化级别以加快编译
+opt-level = 0
+# 保留 debug 信息用于调试
+debug = true
+
+# =============================================================================
+# 注意：构建后可使用 wasm-opt 进一步优化
+# wasm-opt -Oz -o output.wasm input.wasm
+# Trunk 默认会自动执行 wasm-opt（如果已安装 binaryen）
+# =============================================================================
+

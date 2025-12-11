@@ -299,8 +299,14 @@ impl From<worker::Error> for WatchError {
     }
 }
 
-impl From<serde_json::Error> for WatchError {
-    fn from(e: serde_json::Error) -> Self {
+impl From<serde_json_wasm::de::Error> for WatchError {
+    fn from(e: serde_json_wasm::de::Error) -> Self {
+        WatchError::serialization(e.to_string())
+    }
+}
+
+impl From<serde_json_wasm::ser::Error> for WatchError {
+    fn from(e: serde_json_wasm::ser::Error) -> Self {
         WatchError::serialization(e.to_string())
     }
 }
