@@ -1,4 +1,4 @@
-name: Deploy Worker
+name: Deploy Backend
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
       - backend/**
       - '!backend/**/*.md'
       - '!backend/**/.gitignore'
-      - .github/workflows/deploy.yml
+      - .github/workflows/deploy_backend.yml
 
 jobs:
   deploy:

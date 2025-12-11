@@ -140,7 +140,7 @@ wrangler deploy
 ```yaml
 name: Deploy Worker
 
-on:
+on
   push:
     branches:
       - main

@@ -56,10 +56,71 @@ trunk build --release
 
 ### 部署到 Cloudflare Pages (推荐)
 
+#### 方式 A: 手动配置 Cloudflare Pages
+
 如果您使用 Cloudflare Pages 部署，可以在构建设置中配置：
 *   **Build command**: `curl -sSf https://sh.rustup.rs | sh -s -- -y && source "$HOME/.cargo/env" && rustup target add wasm32-unknown-unknown && cargo install trunk && trunk build --release` (或者使用预装 Rust 环境)
 *   **Build output directory**: `frontend/dist`
 *   **Root directory**: `frontend`
+
+#### 方式 B: 使用 GitHub Actions 自动部署 (推荐)
+
+如果您希望通过 GitHub Actions 实现自动化部署（CI/CD），请在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 中配置以下 Repository Secrets：
+
+* `CLOUDFLARE_API_TOKEN`: 您的 Cloudflare API Token 
+
+**获取方式:**
+1.  **CLOUDFLARE_API_TOKEN**: 
+    - 创建地址：Cloudflare Dashboard → My Profile → API Tokens
+    - 权限模板：选择 "Edit Cloudflare Pages"
+2.  **CLOUDFLARE_ACCOUNT_ID**: 
+    - 获取地址：Cloudflare Dashboard → Workers & Pages → 右侧边栏
+
+**工作流配置** (`.github/workflows/deploy_frontend.yml`):
+
+```yaml
+name: Deploy Frontend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - frontend/**
+      - shared/**
+      - '!frontend/**/*.md'
+      - .github/workflows/deploy_frontend.yml
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Build and Deploy
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Trunk
+        run: cargo install trunk --locked
+
+      - name: Build
+        working-directory: frontend
+        run: trunk build --release
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: pages deploy frontend/dist --project-name=verwatch
+```
+
+**触发条件:**
+-   推送到 `main` 分支
+-   更改 `frontend/` 或 `shared/` 目录下的文件（不包括 `.md` 文件）
 
 ## 项目结构
 
