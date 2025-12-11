@@ -37,9 +37,6 @@ pub fn hook(info: &panic::PanicHookInfo) {
     }
 }
 
-/// Automatically registers the panic hook when the WASM module is instantiated.
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen(start)]
-pub fn init_panic_hook() {
+pub fn register() {
     panic::set_hook(Box::new(hook));
 }

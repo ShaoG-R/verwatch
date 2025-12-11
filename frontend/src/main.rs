@@ -13,5 +13,6 @@ static ALLOCATOR: AssumeSingleThreaded<FreeListAllocator> =
 mod panic_hook;
 
 pub fn main() {
+    panic_hook::register();
     mount_to_body(App);
 }
