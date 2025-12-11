@@ -15,9 +15,8 @@ RUN pacman -Syu --noconfirm && \
 RUN rustup default stable && \
     rustup target add wasm32-unknown-unknown
 
-# Add cargo bin to PATH and enable bulk-memory for WASM
+# Add cargo bin to PATH
 ENV PATH="/root/.cargo/bin:${PATH}"
-ENV RUSTFLAGS="-C target-feature=+bulk-memory"
 
 # Install trunk and wasm-bindgen-cli
 RUN cargo install trunk --locked
@@ -35,8 +34,11 @@ RUN rm -rf assets && mkdir -p assets && \
     curl -fsSL -o assets/daisyui.css https://cdn.jsdelivr.net/npm/daisyui@5/daisyui.css && \
     curl -fsSL -o assets/tailwind.js https://unpkg.com/@tailwindcss/browser@4
 
-# Build
-RUN trunk build --release
+# Setup WASM-specific rustflags and build
+RUN mkdir -p .cargo && \
+    echo '[target.wasm32-unknown-unknown]' > .cargo/config.toml && \
+    echo 'rustflags = ["-C", "target-feature=+bulk-memory"]' >> .cargo/config.toml && \
+    trunk build --release
 
 # Export stage - only output the dist directory
 FROM scratch AS export
