@@ -31,6 +31,9 @@ jobs:
           cache-targets: true
           cache-on-failure: true
 
+      - name: Install binaryen (wasm-opt)
+        run: sudo apt-get update && sudo apt-get install -y binaryen
+
       - name: Install Trunk and wasm-bindgen
         run: cargo install trunk wasm-bindgen-cli --locked
 
