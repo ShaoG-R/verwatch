@@ -20,7 +20,7 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 ENV RUSTFLAGS="-C target-feature=+bulk-memory"
 
 # Install trunk and wasm-bindgen-cli
-RUN cargo install trunk wasm-bindgen-cli --locked
+RUN cargo install trunk --locked
 
 # Set working directory
 WORKDIR /app
