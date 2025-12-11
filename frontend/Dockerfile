@@ -34,11 +34,13 @@ RUN rm -rf assets && mkdir -p assets && \
     curl -fsSL -o assets/daisyui.css https://cdn.jsdelivr.net/npm/daisyui@5/daisyui.css && \
     curl -fsSL -o assets/tailwind.js https://unpkg.com/@tailwindcss/browser@4
 
-# Setup WASM-specific rustflags and build
-RUN mkdir -p .cargo && \
-    echo '[target.wasm32-unknown-unknown]' > .cargo/config.toml && \
-    echo 'rustflags = ["-C", "target-feature=+bulk-memory"]' >> .cargo/config.toml && \
-    trunk build --release
+# Build
+RUN trunk build --release
+
+# Manual wasm-opt optimization with bulk-memory support
+RUN for wasm in dist/*.wasm; do \
+    wasm-opt --enable-bulk-memory -Oz -o "$wasm" "$wasm"; \
+    done
 
 # Export stage - only output the dist directory
 FROM scratch AS export
