@@ -18,8 +18,8 @@ RUN rustup default stable && \
 # Add cargo bin to PATH
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install trunk
-RUN cargo install trunk --locked
+# Install trunk and wasm-bindgen-cli
+RUN cargo install trunk wasm-bindgen-cli --locked
 
 # Set working directory
 WORKDIR /app
