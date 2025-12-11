@@ -6,6 +6,7 @@ mod project;
 mod repository;
 
 pub(crate) mod utils {
+    pub mod concurrent;
     pub mod github;
     pub mod request;
     pub mod rpc;

@@ -89,7 +89,7 @@ where
             .iter()
             .map(|key| async { self.monitor_client.get_config(key).await });
 
-        let results = futures::future::join_all(tasks).await;
+        let results = crate::utils::concurrent::join_all(tasks).await;
 
         // 收集成功的 Config，忽略失败的（可能是脏数据）
         let configs: Vec<ProjectConfig> = results
