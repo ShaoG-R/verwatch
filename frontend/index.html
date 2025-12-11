@@ -27,4 +27,17 @@
 <body class="bg-slate-950 min-h-screen">
 </body>
 
+<script>
+    // 格式化函数 - 供 WASM 通过 wasm-bindgen 调用
+    window.formatCountdown = function (secs) {
+        if (secs <= 0) return '即将刷新...';
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        const s = secs % 60;
+        if (h > 0) return `${h}h ${m}m ${s}s`;
+        if (m > 0) return `${m}m ${s}s`;
+        return `${s}s`;
+    };
+</script>
+
 </html>

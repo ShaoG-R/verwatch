@@ -75,15 +75,17 @@ pub fn AddProjectDialog(#[prop(into)] on_add: Callback<CreateProjectRequest>) ->
                     3600
                 };
                 verwatch_shared::TimeConfig {
-                    check_interval: std::time::Duration::from_secs(
+                    check_interval: verwatch_shared::DurationSecs::from_secs(
                         check_interval_val.get() * multiplier,
                     ),
-                    retry_interval: std::time::Duration::from_secs(retry_interval_seconds.get()),
+                    retry_interval: verwatch_shared::DurationSecs::from_secs(
+                        retry_interval_seconds.get(),
+                    ),
                 }
             } else {
                 verwatch_shared::TimeConfig::default()
             },
-            initial_delay: std::time::Duration::from_secs(0),
+            initial_delay: verwatch_shared::DurationSecs::from_secs(0),
             comparison_mode: comp_mode.get(),
             dispatch_token_secret: secret_opt,
         };

@@ -7,6 +7,14 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::hooks::use_navigate;
 use verwatch_shared::{CreateProjectRequest, Date, MonitorState, ProjectConfig};
+use wasm_bindgen::prelude::*;
+
+// JS 格式化函数绑定 (定义在 index.html)
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = formatCountdown)]
+    fn format_countdown(secs: i64) -> String;
+}
 
 // --- Logic Layer: Dashboard Store ---
 
@@ -436,29 +444,15 @@ fn ProjectRow(project: ProjectConfig) -> impl IntoView {
     let state_for_badge = project.state.clone();
     let display = ProjectRowDisplay::from(&project);
 
-    // Countdown Text
+    // Countdown Text - 调用 JS 格式化函数
     let countdown_text = move || {
         let _ = store.tick.get(); // Subscribe to tick
         match &state_for_countdown {
             MonitorState::Paused => "--".to_string(),
             MonitorState::Running { next_check_at } => {
                 let now = Date::now_timestamp();
-                let diff = *next_check_at - now;
-                let secs = diff.as_secs() as i64;
-                if secs <= 0 {
-                    "即将刷新...".to_string()
-                } else {
-                    let hours = secs / 3600;
-                    let minutes = (secs % 3600) / 60;
-                    let seconds = secs % 60;
-                    if hours > 0 {
-                        format!("{}h {}m {}s", hours, minutes, seconds)
-                    } else if minutes > 0 {
-                        format!("{}m {}s", minutes, seconds)
-                    } else {
-                        format!("{}s", seconds)
-                    }
-                }
+                let secs = (*next_check_at - now).as_secs() as i64;
+                format_countdown(secs)
             }
         }
     };

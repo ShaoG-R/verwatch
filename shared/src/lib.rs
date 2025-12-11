@@ -1,6 +1,5 @@
-use std::time::Duration;
-
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 // =========================================================
 // 时间类型模块 (Date Types)
@@ -17,8 +16,53 @@ pub mod protocol;
 
 pub const PREFIX_VERSION: &str = "v:";
 pub const HEADER_AUTH_KEY: &str = "X-Auth-Key";
-pub const CHECK_INTERVAL: Duration = Duration::from_hours(1);
-pub const RETRY_INTERVAL: Duration = Duration::from_secs(10);
+pub const CHECK_INTERVAL: DurationSecs = DurationSecs::from_hours(1);
+pub const RETRY_INTERVAL: DurationSecs = DurationSecs::from_secs(10);
+
+// =========================================================
+// DurationSecs - 避免 flt2dec 的秒数类型
+// =========================================================
+
+/// 秒数类型，用于避免 std::time::Duration 的浮点数序列化
+///
+/// 内部存储为 `u64`，表示秒数
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
+#[serde(transparent)]
+pub struct DurationSecs(u64);
+
+impl DurationSecs {
+    #[inline]
+    pub const fn from_secs(secs: u64) -> Self {
+        Self(secs)
+    }
+
+    #[inline]
+    pub const fn from_hours(hours: u64) -> Self {
+        Self(hours * 3600)
+    }
+
+    #[inline]
+    pub const fn as_secs(&self) -> u64 {
+        self.0
+    }
+
+    #[inline]
+    pub const fn as_millis(&self) -> u64 {
+        self.0 * 1000
+    }
+}
+
+impl From<Duration> for DurationSecs {
+    fn from(d: Duration) -> Self {
+        Self(d.as_secs())
+    }
+}
+
+impl From<DurationSecs> for Duration {
+    fn from(d: DurationSecs) -> Self {
+        Duration::from_secs(d.0)
+    }
+}
 
 // =========================================================
 // 领域模型 (Domain Models)
@@ -100,8 +144,8 @@ impl BaseConfig {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TimeConfig {
-    pub check_interval: Duration,
-    pub retry_interval: Duration,
+    pub check_interval: DurationSecs,
+    pub retry_interval: DurationSecs,
 }
 
 impl Default for TimeConfig {
@@ -119,7 +163,7 @@ pub struct CreateProjectRequest {
 
     pub time_config: TimeConfig,
 
-    pub initial_delay: Duration,
+    pub initial_delay: DurationSecs,
 
     // 存储 Secret 变量名，而不是 Token 本身
     // 对应 wrangler.toml 中的 [secrets] 或 [vars]

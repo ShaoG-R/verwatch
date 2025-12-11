@@ -180,12 +180,12 @@ curl -X POST https://verwatch.your-subdomain.workers.dev/api/projects \
       "my_repo": "my-forked-repo"
     },
     "time_config": {
-      "check_interval": { "secs": 3600, "nanos": 0 },
-      "retry_interval": { "secs": 60, "nanos": 0 }
+      "check_interval": 3600,
+      "retry_interval": 60
     },
     "comparison_mode": "published_at",
     "dispatch_token_secret": "MY_CUSTOM_TOKEN_VAR",
-    "initial_delay": { "secs": 60, "nanos": 0 }
+    "initial_delay": 60
   }'
 ```
 
@@ -193,12 +193,12 @@ curl -X POST https://verwatch.your-subdomain.workers.dev/api/projects \
 - `base_config`: 基础配置
   - `upstream_owner/repo`: 您想要监控的上游仓库。
   - `my_owner/repo`: 您想要触发更新的下游仓库（您自己的仓库）。
-- `time_config`: 时间配置
-  - `check_interval`: 检查间隔（默认 1 小时）
-  - `retry_interval`: 失败重试间隔（默认 60 秒）
+- `time_config`: 时间配置（单位：秒）
+  - `check_interval`: 检查间隔，秒数（默认 3600 = 1 小时）
+  - `retry_interval`: 失败重试间隔，秒数（默认 10 秒）
 - `comparison_mode`: (必填) `published_at` (推荐) 或 `updated_at`。
 - `dispatch_token_secret`: (可选) 在 Secrets 中配置的 Token 变量名。默认使用 `MY_GITHUB_PAT`。
-- `initial_delay`: 首次检查的延迟时间。
+- `initial_delay`: 首次检查的延迟时间，秒数。
 
 ### 2. 查看监控列表 (GET)
 

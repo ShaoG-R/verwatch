@@ -2,7 +2,7 @@ use super::*;
 use crate::project::adapter::tests::{MockEnv, MockStorage};
 use crate::utils::request::MockHttpClient;
 use std::time::Duration;
-use verwatch_shared::{BaseConfig, ComparisonMode, CreateProjectRequest, TimeConfig};
+use verwatch_shared::{BaseConfig, ComparisonMode, CreateProjectRequest, DurationSecs, TimeConfig};
 
 // =========================================================
 // 辅助函数
@@ -17,7 +17,7 @@ fn create_test_config() -> ProjectConfig {
             my_repo: "my_repo".to_string(),
         },
         time_config: TimeConfig::default(),
-        initial_delay: Duration::from_secs(60),
+        initial_delay: DurationSecs::from_secs(60),
         dispatch_token_secret: None,
         comparison_mode: ComparisonMode::PublishedAt,
     };
@@ -82,7 +82,7 @@ async fn test_setup_sets_alarm() {
     let client = MockHttpClient::new();
     let logic = create_logic(storage, env, client);
 
-    let delay = Duration::from_secs(120);
+    let delay = DurationSecs::from_secs(120);
     let mut config = create_test_config();
     config.request.initial_delay = delay;
 
@@ -92,7 +92,7 @@ async fn test_setup_sets_alarm() {
 
     // 验证 alarm 已设置
     let alarm = logic.storage.alarm.borrow();
-    assert_eq!(*alarm, Some(delay));
+    assert_eq!(*alarm, Some(Duration::from(delay)));
 }
 
 // =========================================================

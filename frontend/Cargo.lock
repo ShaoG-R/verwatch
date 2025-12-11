@@ -1815,6 +1815,7 @@ dependencies = [
  "leptos_router",
  "lol_alloc",
  "verwatch-shared",
+ "wasm-bindgen",
 ]
 
 [[package]]

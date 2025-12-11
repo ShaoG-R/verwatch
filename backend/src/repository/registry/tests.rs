@@ -134,7 +134,7 @@ fn make_test_config(key: &str) -> ProjectConfig {
             time_config: TimeConfig::default(),
             comparison_mode: verwatch_shared::ComparisonMode::PublishedAt,
             dispatch_token_secret: None,
-            initial_delay: std::time::Duration::from_secs(0),
+            initial_delay: verwatch_shared::DurationSecs::from_secs(0),
         },
         state: MonitorState::Paused,
     }

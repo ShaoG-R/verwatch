@@ -4,6 +4,7 @@
 //! - `Timestamp`: 可序列化的毫秒时间戳，用于传输和存储
 //! - `Date`: 操作型时间类型，提供 now(), parse() 等方法
 
+use crate::DurationSecs;
 use serde::{Deserialize, Serialize};
 use std::ops::{Add, Sub};
 use std::time::Duration;
@@ -14,44 +15,44 @@ use std::time::Duration;
 
 /// 毫秒时间戳，用于序列化传输和存储
 ///
-/// 内部存储为 `f64`，表示自 Unix 纪元以来的毫秒数
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize, Default)]
+/// 内部存储为 `i64`，表示自 Unix 纪元以来的毫秒数
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default)]
 #[serde(transparent)]
-pub struct Timestamp(f64);
+pub struct Timestamp(i64);
 
 impl Timestamp {
     /// 创建新的时间戳
     #[inline]
-    pub const fn new(ms: f64) -> Self {
+    pub const fn new(ms: i64) -> Self {
         Self(ms)
     }
 
     /// 获取毫秒值
     #[inline]
-    pub const fn as_millis(&self) -> f64 {
+    pub const fn as_millis(&self) -> i64 {
         self.0
     }
 
     /// 获取秒值
     #[inline]
-    pub fn as_secs(&self) -> f64 {
-        self.0 / 1000.0
+    pub const fn as_secs(&self) -> i64 {
+        self.0 / 1000
     }
 
     /// 转换为整数毫秒（用于 key 生成等场景）
     #[inline]
-    pub fn as_millis_i64(&self) -> i64 {
-        self.0 as i64
+    pub const fn as_millis_i64(&self) -> i64 {
+        self.0
     }
 }
 
-impl From<f64> for Timestamp {
-    fn from(ms: f64) -> Self {
+impl From<i64> for Timestamp {
+    fn from(ms: i64) -> Self {
         Self(ms)
     }
 }
 
-impl From<Timestamp> for f64 {
+impl From<Timestamp> for i64 {
     fn from(ts: Timestamp) -> Self {
         ts.0
     }
@@ -61,7 +62,15 @@ impl Add<Duration> for Timestamp {
     type Output = Self;
 
     fn add(self, rhs: Duration) -> Self::Output {
-        Self(self.0 + rhs.as_millis() as f64)
+        Self(self.0 + rhs.as_millis() as i64)
+    }
+}
+
+impl Add<DurationSecs> for Timestamp {
+    type Output = Self;
+
+    fn add(self, rhs: DurationSecs) -> Self::Output {
+        Self(self.0 + rhs.as_millis() as i64)
     }
 }
 
@@ -70,7 +79,7 @@ impl Sub<Timestamp> for Timestamp {
 
     /// 计算两个时间戳之间的差值（返回 Duration）
     fn sub(self, rhs: Timestamp) -> Self::Output {
-        let diff_ms = (self.0 - rhs.0).max(0.0);
+        let diff_ms = (self.0 - rhs.0).max(0);
         Duration::from_millis(diff_ms as u64)
     }
 }
@@ -95,13 +104,13 @@ impl Date {
     /// 获取当前时间的毫秒时间戳
     #[inline]
     pub fn now_timestamp() -> Timestamp {
-        Timestamp(js_sys::Date::now())
+        Timestamp(js_sys::Date::now() as i64)
     }
 
     /// 从毫秒时间戳创建
     #[inline]
     pub fn from_timestamp(ts: Timestamp) -> Self {
-        Self(js_sys::Date::new(&ts.0.into()))
+        Self(js_sys::Date::new(&(ts.0 as f64).into()))
     }
 
     /// 从 ISO 8601 / RFC 3339 字符串解析
@@ -124,20 +133,20 @@ impl Date {
         if ms.is_nan() {
             None
         } else {
-            Some(Timestamp(ms))
+            Some(Timestamp(ms as i64))
         }
     }
 
     /// 转换为时间戳
     #[inline]
     pub fn timestamp(&self) -> Timestamp {
-        Timestamp(self.0.get_time())
+        Timestamp(self.0.get_time() as i64)
     }
 
     /// 获取毫秒值
     #[inline]
-    pub fn as_millis(&self) -> f64 {
-        self.0.get_time()
+    pub fn as_millis(&self) -> i64 {
+        self.0.get_time() as i64
     }
 }
 

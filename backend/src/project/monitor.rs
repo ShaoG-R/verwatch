@@ -82,7 +82,7 @@ where
         config.state = MonitorState::running(next_check_at);
 
         self.storage.put(STATE_KEY_CONFIG, &config).await?;
-        self.storage.set_alarm(delay).await?;
+        self.storage.set_alarm(delay.into()).await?;
 
         Ok(())
     }
@@ -182,7 +182,7 @@ where
         self.storage.put(STATE_KEY_CONFIG, &config).await?;
 
         // 6. 设置下一次 Alarm
-        self.storage.set_alarm(next_interval).await?;
+        self.storage.set_alarm(next_interval.into()).await?;
 
         Ok(())
     }

@@ -114,7 +114,7 @@ impl<'a, R: Registry> AdminLogic<'a, R> {
 mod tests {
     use super::*;
     use crate::{error::WatchErrorStatus, repository::tests::MockRegistry};
-    use verwatch_shared::{BaseConfig, ComparisonMode, TimeConfig};
+    use verwatch_shared::{BaseConfig, ComparisonMode, DurationSecs, TimeConfig};
 
     fn make_request(upstream_repo: &str) -> CreateProjectRequest {
         CreateProjectRequest {
@@ -127,7 +127,7 @@ mod tests {
             time_config: TimeConfig::default(),
             comparison_mode: ComparisonMode::PublishedAt,
             dispatch_token_secret: None,
-            initial_delay: std::time::Duration::from_secs(60),
+            initial_delay: DurationSecs::from_secs(60),
         }
     }
 
