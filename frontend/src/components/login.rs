@@ -2,9 +2,9 @@ use crate::auth::AuthContext;
 use crate::auth::login;
 use crate::auth::use_auth;
 use crate::components::icons::ShieldCheck;
+use crate::web::use_navigate;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use leptos_router::hooks::use_navigate;
 
 #[component]
 pub fn LoginPage() -> impl IntoView {
@@ -22,7 +22,7 @@ pub fn LoginPage() -> impl IntoView {
         move |_| {
             let state = auth_state.get();
             if !state.is_loading && state.is_authenticated {
-                navigate("/dashboard", Default::default());
+                navigate("/dashboard");
             }
         }
     });
@@ -50,13 +50,14 @@ pub fn LoginPage() -> impl IntoView {
                     spawn_local(async move {
                         let success = login(set_auth, url.get(), secret.get()).await;
                         if success {
-                            navigate("/dashboard", Default::default());
+                            navigate("/dashboard");
                         } else {
                             set_error_msg.set(Some("连接失败。请检查 URL 和密钥。".to_string()));
                         }
                         set_is_submitting.set(false);
                     });
                 };
+
 
                 view! {
                     <div class="hero min-h-screen bg-base-200">

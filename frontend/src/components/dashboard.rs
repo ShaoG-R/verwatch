@@ -2,10 +2,9 @@ use crate::api::VerWatchApi;
 use crate::auth::{AuthContext, logout, use_auth};
 use crate::components::add_project_dialog::AddProjectDialog;
 use crate::components::icons::*;
-use crate::web::Interval;
+use crate::web::{Interval, use_navigate};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use leptos_router::hooks::use_navigate;
 use verwatch_shared::{CreateProjectRequest, Date, MonitorState, ProjectConfig};
 use wasm_bindgen::prelude::*;
 
@@ -240,7 +239,7 @@ pub fn DashboardPage() -> impl IntoView {
         move |_| {
             let state = auth_state.get();
             if !state.is_loading && !state.is_authenticated {
-                navigate("/", Default::default());
+                navigate("/");
             }
         }
     });
@@ -254,7 +253,7 @@ pub fn DashboardPage() -> impl IntoView {
 
                 <DashboardNavbar
                     backend_url=backend_url
-                    on_logout=Callback::new(move |_| { logout(set_auth); navigate("/", Default::default()); })
+                    on_logout=Callback::new(move |_| { logout(set_auth); navigate("/"); })
                 />
 
                 <DashboardStats />
