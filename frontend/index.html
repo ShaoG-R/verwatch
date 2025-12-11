@@ -15,7 +15,8 @@
     <link data-trunk rel="copy-file" href="assets/tailwind.js" />
     <script src="tailwind.js"></script>
 
-    <link data-trunk rel="rust" />
+    <link data-trunk rel="rust" data-wasm-opt="z"
+        data-wasm-opt-params="--enable-bulk-memory --enable-nontrapping-float-to-int" />
     <style>
         body {
             font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
