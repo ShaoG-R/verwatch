@@ -1,7 +1,8 @@
+use crate::error::{WatchError, WatchResult};
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::time::Duration;
-use worker::{wasm_bindgen, Delay, Error, Fetch, Headers, Request, RequestInit, Result};
+use worker::{Delay, Fetch, Headers, Request, RequestInit, wasm_bindgen};
 
 #[cfg(test)]
 use std::cell::RefCell;
@@ -71,14 +72,15 @@ pub struct HttpResponse {
 }
 
 impl HttpResponse {
-    pub fn json<T: DeserializeOwned>(&self) -> Result<T> {
-        serde_json::from_str(&self.body).map_err(|e| Error::from(e.to_string()))
+    pub fn json<T: DeserializeOwned>(&self) -> WatchResult<T> {
+        serde_json::from_str(&self.body)
+            .map_err(|e| WatchError::serialization(e.to_string()).in_op("http.json"))
     }
 }
 
 #[async_trait::async_trait(?Send)]
 pub trait HttpClient {
-    async fn send(&self, req: HttpRequest) -> Result<HttpResponse>;
+    async fn send(&self, req: HttpRequest) -> WatchResult<HttpResponse>;
 }
 
 // =========================================================
@@ -90,17 +92,20 @@ pub struct WorkerHttpClient;
 
 #[async_trait::async_trait(?Send)]
 impl HttpClient for WorkerHttpClient {
-    async fn send(&self, req: HttpRequest) -> Result<HttpResponse> {
+    async fn send(&self, req: HttpRequest) -> WatchResult<HttpResponse> {
         // 使用循环处理重试逻辑
         let mut retry_count = 0;
         // 限制最大重试次数防止死循环，这里设为 1 次，即等待后重试一次
         const MAX_RETRIES: i32 = 1;
+        let url_for_context = req.url.clone();
 
         loop {
             let headers = Headers::new();
             // 使用引用遍历，避免消耗 req.headers
             for (k, v) in &req.headers {
-                headers.set(k, v)?;
+                headers.set(k, v).map_err(|e| {
+                    WatchError::from(e).in_op_with("http.headers", &url_for_context)
+                })?;
             }
 
             let mut init = RequestInit {
@@ -113,13 +118,19 @@ impl HttpClient for WorkerHttpClient {
                 init.body = Some(wasm_bindgen::JsValue::from_str(body_str));
             }
 
-            let worker_req = Request::new_with_init(&req.url, &init)?;
-            let mut response = Fetch::Request(worker_req).send().await?;
+            let worker_req = Request::new_with_init(&req.url, &init)
+                .map_err(|e| WatchError::from(e).in_op_with("http.request", &url_for_context))?;
+            let mut response = Fetch::Request(worker_req).send().await.map_err(|e| {
+                WatchError::external_api(e.to_string()).in_op_with("http.fetch", &url_for_context)
+            })?;
             let status = response.status_code();
 
             // 检查 403 和 Rate Limit
             if status == 403 && retry_count < MAX_RETRIES {
-                let remaining = response.headers().get("X-RateLimit-Remaining")?;
+                let remaining = response
+                    .headers()
+                    .get("X-RateLimit-Remaining")
+                    .map_err(|e| WatchError::from(e).in_op("http.rate_limit_header"))?;
                 if let Some(val) = remaining {
                     // 如果剩余次数为 0，说明被限流
                     if val == "0" {
@@ -133,10 +144,11 @@ impl HttpClient for WorkerHttpClient {
             }
 
             // 正常返回（成功或非 Rate Limit 的错误）
-            return Ok(HttpResponse {
-                status,
-                body: response.text().await?,
-            });
+            let body = response
+                .text()
+                .await
+                .map_err(|e| WatchError::from(e).in_op_with("http.body", &url_for_context))?;
+            return Ok(HttpResponse { status, body });
         }
     }
 }
@@ -173,7 +185,7 @@ impl MockHttpClient {
 #[cfg(test)]
 #[async_trait::async_trait(?Send)]
 impl HttpClient for MockHttpClient {
-    async fn send(&self, req: HttpRequest) -> Result<HttpResponse> {
+    async fn send(&self, req: HttpRequest) -> WatchResult<HttpResponse> {
         self.requests.borrow_mut().push((
             req.url.clone(),
             format!("{:?}", req.method),

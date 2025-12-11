@@ -1,4 +1,4 @@
-use crate::error::{AppError, Result};
+use crate::error::{WatchError, WatchResult};
 use crate::utils::github::release::GitHubRelease;
 // 引入同目录下的模块
 use super::adapter::{AlarmScheduler, EnvAdapter, StorageAdapter, WorkerEnv, WorkerStorage};
@@ -74,7 +74,7 @@ where
 
     // --- RPC 处理函数 (不依赖外部调用) ---
 
-    pub async fn setup(&self, cmd: SetupMonitorCmd) -> Result<()> {
+    pub async fn setup(&self, cmd: SetupMonitorCmd) -> WatchResult<()> {
         let mut config = cmd.config;
         let delay = config.request.initial_delay;
 
@@ -88,7 +88,7 @@ where
         Ok(())
     }
 
-    pub async fn stop(&self, _cmd: StopMonitorCmd) -> Result<()> {
+    pub async fn stop(&self, _cmd: StopMonitorCmd) -> WatchResult<()> {
         // 清理所有数据
         self.storage.delete(STATE_KEY_CONFIG).await?;
         self.storage.delete(STATE_KEY_VERSION).await?;
@@ -98,14 +98,14 @@ where
         Ok(())
     }
 
-    pub async fn get_config(&self, _cmd: GetConfigCmd) -> Result<Option<ProjectConfig>> {
+    pub async fn get_config(&self, _cmd: GetConfigCmd) -> WatchResult<Option<ProjectConfig>> {
         self.storage.get(STATE_KEY_CONFIG).await
     }
 
-    pub async fn switch_monitor(&self, cmd: SwitchMonitorCmd) -> Result<()> {
+    pub async fn switch_monitor(&self, cmd: SwitchMonitorCmd) -> WatchResult<()> {
         let mut config: ProjectConfig = match self.storage.get(STATE_KEY_CONFIG).await? {
             Some(c) => c,
-            None => return Err(AppError::not_found("No config found")),
+            None => return Err(WatchError::not_found("No config found").in_op("switch_monitor")),
         };
 
         let is_currently_paused = config.state.is_paused();
@@ -130,17 +130,20 @@ where
     }
 
     /// 手动触发检查
-    pub async fn trigger(&self, _cmd: TriggerCheckCmd) -> Result<()> {
+    pub async fn trigger(&self, _cmd: TriggerCheckCmd) -> WatchResult<()> {
         let config: Option<ProjectConfig> = self.storage.get(STATE_KEY_CONFIG).await?;
         match config {
-            Some(cfg) => self.perform_check_flow(&cfg).await,
-            None => Err(AppError::not_found("No config found")),
+            Some(cfg) => self
+                .perform_check_flow(&cfg)
+                .await
+                .map_err(|e| e.in_op("trigger")),
+            None => Err(WatchError::not_found("No config found").in_op("trigger")),
         }
     }
 
     // --- Alarm 回调函数 ---
 
-    pub async fn on_alarm(&self) -> Result<()> {
+    pub async fn on_alarm(&self) -> WatchResult<()> {
         let config: Option<ProjectConfig> = self.storage.get(STATE_KEY_CONFIG).await?;
 
         // 1. 僵尸检查
@@ -186,7 +189,7 @@ where
         Ok(())
     }
 
-    async fn perform_check_flow(&self, config: &ProjectConfig) -> Result<()> {
+    async fn perform_check_flow(&self, config: &ProjectConfig) -> WatchResult<()> {
         // 获取 Secrets
         let github_token_name = self
             .env
@@ -206,7 +209,16 @@ where
                 &config.request.base_config.upstream_repo,
             )
             .await
-            .map_err(|e| AppError::store(format!("GitHub API: {}", e)))?;
+            .map_err(|e| {
+                WatchError::external_api(e.to_string()).in_op_with(
+                    "github.fetch_release",
+                    format!(
+                        "{}/{}",
+                        config.request.base_config.upstream_owner,
+                        config.request.base_config.upstream_repo
+                    ),
+                )
+            })?;
 
         // B & C. 获取本地状态并进行比较
         // 存储的是 GitHubRelease 结构体(JSON)，而不仅仅是 String
@@ -242,15 +254,22 @@ where
             .as_deref()
             .unwrap_or(&default_pat_name);
 
-        let pat = self
-            .env
-            .secret(pat_key)
-            .ok_or_else(|| AppError::store(format!("Secret '{}' missing", pat_key)))?;
+        let pat = self.env.secret(pat_key).ok_or_else(|| {
+            WatchError::not_found(format!("Secret '{}' missing", pat_key)).in_op("env.secret")
+        })?;
 
         gateway
             .trigger_dispatch(config, &remote_release.tag_name, &pat)
             .await
-            .map_err(|e| AppError::store(format!("Dispatch: {}", e)))?;
+            .map_err(|e| {
+                WatchError::external_api(e.to_string()).in_op_with(
+                    "github.dispatch",
+                    format!(
+                        "{}/{}",
+                        config.request.base_config.my_owner, config.request.base_config.my_repo
+                    ),
+                )
+            })?;
 
         // E. 更新状态
         // 存储整个 remote_release 对象，以便下次比较时保留 mode 信息

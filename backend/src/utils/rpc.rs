@@ -1,4 +1,4 @@
-use crate::error::{AppError, Result};
+use crate::error::{WatchError, WatchResult};
 
 use serde::{Serialize, de::DeserializeOwned};
 use std::future::Future;
@@ -36,13 +36,16 @@ impl RpcClient {
     }
 
     /// 发送强类型请求并获取解析后的响应
-    pub async fn send<T: ApiRequest>(&self, req: &T) -> Result<T::Response> {
+    pub async fn send<T: ApiRequest>(&self, req: &T) -> WatchResult<T::Response> {
         // 1. 序列化请求
-        let body = serde_json::to_string(req)?;
+        let body = serde_json::to_string(req)
+            .map_err(|e| WatchError::from(e).in_op_with("rpc.serialize", T::PATH))?;
 
         // 2. 构造 Headers
         let headers = Headers::new();
-        headers.set("Content-Type", "application/json")?;
+        headers
+            .set("Content-Type", "application/json")
+            .map_err(|e| WatchError::from(e).in_op("rpc.headers"))?;
 
         // 3. 构造 Request
         let mut init = RequestInit::new();
@@ -50,10 +53,15 @@ impl RpcClient {
         init.with_body(Some(JsValue::from_str(&body)));
 
         let url = format!("{}{}", self.base_url, T::PATH);
-        let request = Request::new_with_init(&url, &init)?;
+        let request = Request::new_with_init(&url, &init)
+            .map_err(|e| WatchError::from(e).in_op_with("rpc.request", T::PATH))?;
 
         // 4. 发送请求 (RPC 调用)
-        let mut response = self.stub.fetch_with_request(request).await?;
+        let mut response = self
+            .stub
+            .fetch_with_request(request)
+            .await
+            .map_err(|e| WatchError::from(e).in_op_with("rpc.fetch", T::PATH))?;
 
         // 5. 检查状态码
         if response.status_code() != 200 {
@@ -69,27 +77,29 @@ impl RpcClient {
                 .is_some();
 
             if is_rpc_error {
-                // 尝试恢复为强类型 AppError
+                // 尝试恢复为强类型 WatchError (已携带远端上下文)
                 if let Ok(error_response) =
                     serde_json::from_str::<crate::error::ErrorResponse>(&error_text)
                 {
-                    return Err(error_response.into());
+                    // 将远端错误转回 WatchError，并追加本地 RPC 调用上下文
+                    return Err(WatchError::from(error_response).in_op_with("rpc.call", T::PATH));
                 }
             }
 
-            // Fallback: 统一封装为 AppError::Store
-            return Err(AppError::store(format!(
+            // Fallback: 统一封装为 WatchError::Store
+            return Err(WatchError::store(format!(
                 "RPC Error [{}]: {}",
                 response.status_code(),
                 error_text
-            )));
+            ))
+            .in_op_with("rpc.call", T::PATH));
         }
 
         // 6. 反序列化响应
-        // 如果响应为空，且 Response 类型为 ()，json() 可能会报错，需要处理吗？
-        // 通常 worker::Response::json 会处理好，或者如果是 "Ok" 字符串等情况。
-        // 原有逻辑直接调用的 json::<T::Response>()，假设协议一致。
-        let data = response.json::<T::Response>().await?;
+        let data = response
+            .json::<T::Response>()
+            .await
+            .map_err(|e| WatchError::from(e).in_op_with("rpc.deserialize", T::PATH))?;
         Ok(data)
     }
 }
@@ -107,7 +117,7 @@ impl RpcHandler {
     where
         T: ApiRequest,
         F: FnOnce(T) -> Fut,
-        Fut: Future<Output = Result<T::Response>>,
+        Fut: Future<Output = WatchResult<T::Response>>,
     {
         // 1. 检查 Method
         if req.method() != Method::Post {
@@ -136,10 +146,10 @@ impl RpcHandler {
             Ok(result) => Response::from_json(&result),
             Err(e) => {
                 // 4. 错误处理：将错误转换为 ErrorResponse 并作为 JSON 响应返回
-                // 这样客户端可以通过 Deserialize 还原回原始的 AppError (包含 Status Code 等)
+                // 这样客户端可以通过 Deserialize 还原回原始的 WatchError (包含 Status Code 等)
                 use crate::error::{ErrorResponse, RPC_ERROR_HEADER};
                 let error_response: ErrorResponse = e.into();
-                let status = error_response.status;
+                let status = error_response.status_code();
 
                 match Response::from_json(&error_response) {
                     Ok(mut resp) => {

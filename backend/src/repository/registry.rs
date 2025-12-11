@@ -3,7 +3,7 @@ use super::adapter::{
     WorkerRegistryStorage,
 };
 use super::protocol::*;
-use crate::error::Result;
+use crate::error::WatchResult;
 use crate::utils::rpc::{ApiRequest, RpcHandler};
 use verwatch_shared::ProjectConfig;
 use worker::*;
@@ -36,15 +36,21 @@ where
     /// 1. 计算 unique_key
     /// 2. 调用 Monitor setup
     /// 3. 记录到 Registry
-    pub async fn register(&self, cmd: RegisterMonitorCmd) -> Result<String> {
+    pub async fn register(&self, cmd: RegisterMonitorCmd) -> WatchResult<String> {
         let config = cmd.config;
         let unique_key = config.unique_key.clone();
 
         // 调用 ProjectMonitor 的 setup
-        self.monitor_client.setup(&unique_key, &config).await?;
+        self.monitor_client
+            .setup(&unique_key, &config)
+            .await
+            .map_err(|e| e.in_op_with("register.setup", &unique_key))?;
 
         // 记录到 Registry
-        self.storage.add(&unique_key).await?;
+        self.storage
+            .add(&unique_key)
+            .await
+            .map_err(|e| e.in_op_with("register.save", &unique_key))?;
 
         Ok(unique_key)
     }
@@ -52,7 +58,7 @@ where
     /// 注销一个 Monitor
     /// 1. 调用 Monitor stop
     /// 2. 从 Registry 移除
-    pub async fn unregister(&self, cmd: UnregisterMonitorCmd) -> Result<bool> {
+    pub async fn unregister(&self, cmd: UnregisterMonitorCmd) -> WatchResult<bool> {
         let unique_key = &cmd.unique_key;
 
         // 先检查是否存在
@@ -61,15 +67,21 @@ where
         }
 
         // 调用 ProjectMonitor 的 stop
-        self.monitor_client.stop(unique_key).await?;
+        self.monitor_client
+            .stop(unique_key)
+            .await
+            .map_err(|e| e.in_op_with("unregister.stop", unique_key))?;
 
         // 从 Registry 移除
-        self.storage.remove(unique_key).await
+        self.storage
+            .remove(unique_key)
+            .await
+            .map_err(|e| e.in_op_with("unregister.remove", unique_key))
     }
 
     /// 列出所有已注册的 Monitor 的 ProjectConfig
     /// 遍历查询每个 Monitor
-    pub async fn list(&self, _cmd: ListMonitorsCmd) -> Result<Vec<ProjectConfig>> {
+    pub async fn list(&self, _cmd: ListMonitorsCmd) -> WatchResult<Vec<ProjectConfig>> {
         let keys = self.storage.list().await?;
 
         // 并发获取所有 Config
@@ -88,27 +100,31 @@ where
         Ok(configs)
     }
 
-    pub async fn is_registered(&self, cmd: IsRegisteredCmd) -> Result<bool> {
+    pub async fn is_registered(&self, cmd: IsRegisteredCmd) -> WatchResult<bool> {
         self.storage.contains(&cmd.unique_key).await
     }
 
     /// 切换监控状态
-    pub async fn switch_monitor(&self, cmd: RegistrySwitchMonitorCmd) -> Result<bool> {
+    pub async fn switch_monitor(&self, cmd: RegistrySwitchMonitorCmd) -> WatchResult<bool> {
         if !self.storage.contains(&cmd.unique_key).await? {
             return Ok(false);
         }
         self.monitor_client
             .switch(&cmd.unique_key, cmd.paused)
-            .await?;
+            .await
+            .map_err(|e| e.in_op_with("switch_monitor", &cmd.unique_key))?;
         Ok(true)
     }
 
     /// 手动触发检查
-    pub async fn trigger_check(&self, cmd: RegistryTriggerCheckCmd) -> Result<bool> {
+    pub async fn trigger_check(&self, cmd: RegistryTriggerCheckCmd) -> WatchResult<bool> {
         if !self.storage.contains(&cmd.unique_key).await? {
             return Ok(false);
         }
-        self.monitor_client.trigger_check(&cmd.unique_key).await?;
+        self.monitor_client
+            .trigger_check(&cmd.unique_key)
+            .await
+            .map_err(|e| e.in_op_with("trigger_check", &cmd.unique_key))?;
         Ok(true)
     }
 }

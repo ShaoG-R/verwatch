@@ -1,15 +1,15 @@
 use std::time::Duration;
 
-use crate::error::Result;
+use crate::error::WatchResult;
 use async_trait::async_trait;
 use serde::{Serialize, de::DeserializeOwned};
 
 /// 抽象存储接口：负责数据的持久化
 #[async_trait(?Send)]
 pub trait StorageAdapter {
-    async fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>>;
-    async fn put<T: Serialize>(&self, key: &str, value: &T) -> Result<()>;
-    async fn delete(&self, key: &str) -> Result<bool>;
+    async fn get<T: DeserializeOwned>(&self, key: &str) -> WatchResult<Option<T>>;
+    async fn put<T: Serialize>(&self, key: &str, value: &T) -> WatchResult<()>;
+    async fn delete(&self, key: &str) -> WatchResult<bool>;
 }
 
 /// 抽象环境变量接口：负责访问环境变量和 secrets
@@ -24,43 +24,55 @@ pub trait EnvAdapter {
 #[async_trait(?Send)]
 pub trait AlarmScheduler {
     /// 设置下一次唤醒的时间戳 (毫秒)
-    async fn set_alarm(&self, scheduled_time: Duration) -> Result<()>;
+    async fn set_alarm(&self, scheduled_time: Duration) -> WatchResult<()>;
     /// 删除当前的闹钟
-    async fn delete_alarm(&self) -> Result<()>;
+    async fn delete_alarm(&self) -> WatchResult<()>;
 }
 
 pub struct WorkerStorage(pub worker::Storage);
 
 #[async_trait(?Send)]
 impl StorageAdapter for WorkerStorage {
-    async fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
+    async fn get<T: DeserializeOwned>(&self, key: &str) -> WatchResult<Option<T>> {
         self.0.get(key).await.or_else(|e| {
             let msg = e.to_string();
             if msg.contains("No such value") {
                 Ok(None)
             } else {
-                Err(e.into())
+                Err(crate::error::WatchError::from(e).in_op_with("storage.get", key))
             }
         })
     }
 
-    async fn put<T: Serialize>(&self, key: &str, value: &T) -> Result<()> {
-        self.0.put(key, value).await.map_err(|e| e.into())
+    async fn put<T: Serialize>(&self, key: &str, value: &T) -> WatchResult<()> {
+        self.0
+            .put(key, value)
+            .await
+            .map_err(|e| crate::error::WatchError::from(e).in_op_with("storage.put", key))
     }
 
-    async fn delete(&self, key: &str) -> Result<bool> {
-        self.0.delete(key).await.map_err(|e| e.into())
+    async fn delete(&self, key: &str) -> WatchResult<bool> {
+        self.0
+            .delete(key)
+            .await
+            .map_err(|e| crate::error::WatchError::from(e).in_op_with("storage.delete", key))
     }
 }
 
 #[async_trait(?Send)]
 impl AlarmScheduler for WorkerStorage {
-    async fn set_alarm(&self, scheduled_time: Duration) -> Result<()> {
-        self.0.set_alarm(scheduled_time).await.map_err(|e| e.into())
+    async fn set_alarm(&self, scheduled_time: Duration) -> WatchResult<()> {
+        self.0
+            .set_alarm(scheduled_time)
+            .await
+            .map_err(|e| crate::error::WatchError::from(e).in_op("alarm.set"))
     }
 
-    async fn delete_alarm(&self) -> Result<()> {
-        self.0.delete_alarm().await.map_err(|e| e.into())
+    async fn delete_alarm(&self) -> WatchResult<()> {
+        self.0
+            .delete_alarm()
+            .await
+            .map_err(|e| crate::error::WatchError::from(e).in_op("alarm.delete"))
     }
 }
 
@@ -138,7 +150,7 @@ pub mod tests {
 
     #[async_trait(?Send)]
     impl StorageAdapter for MockStorage {
-        async fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
+        async fn get<T: DeserializeOwned>(&self, key: &str) -> WatchResult<Option<T>> {
             let map = self.map.borrow();
             if let Some(val_str) = map.get(key) {
                 let val = serde_json::from_str(val_str)?;
@@ -148,25 +160,25 @@ pub mod tests {
             }
         }
 
-        async fn put<T: Serialize>(&self, key: &str, value: &T) -> Result<()> {
+        async fn put<T: Serialize>(&self, key: &str, value: &T) -> WatchResult<()> {
             let val_str = serde_json::to_string(value)?;
             self.map.borrow_mut().insert(key.to_string(), val_str);
             Ok(())
         }
 
-        async fn delete(&self, key: &str) -> Result<bool> {
+        async fn delete(&self, key: &str) -> WatchResult<bool> {
             Ok(self.map.borrow_mut().remove(key).is_some())
         }
     }
 
     #[async_trait(?Send)]
     impl AlarmScheduler for MockStorage {
-        async fn set_alarm(&self, scheduled_time: Duration) -> Result<()> {
+        async fn set_alarm(&self, scheduled_time: Duration) -> WatchResult<()> {
             *self.alarm.borrow_mut() = Some(scheduled_time);
             Ok(())
         }
 
-        async fn delete_alarm(&self) -> Result<()> {
+        async fn delete_alarm(&self) -> WatchResult<()> {
             *self.alarm.borrow_mut() = None;
             Ok(())
         }

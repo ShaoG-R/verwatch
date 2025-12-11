@@ -1,6 +1,6 @@
+use crate::error::{WatchError, WatchResult};
 use serde::{Deserialize, Serialize};
 use verwatch_shared::chrono::{DateTime, Utc};
-use worker::{Error, Result};
 
 // =========================================================
 // 1. Enum & Struct
@@ -24,7 +24,7 @@ impl GitHubRelease {
     /// # 错误
     /// 如果两者的比较模式不匹配（例如一个是 Published 另一个是 Updated），
     /// 则返回 Err。
-    pub fn is_newer_than(&self, current: &GitHubRelease) -> Result<bool> {
+    pub fn is_newer_than(&self, current: &GitHubRelease) -> WatchResult<bool> {
         match (self.timestamp, current.timestamp) {
             // 只有同类型才能比较
             (ReleaseTimestamp::Published(t_new), ReleaseTimestamp::Published(t_old)) => {
@@ -34,10 +34,11 @@ impl GitHubRelease {
                 Ok(t_new > t_old)
             }
             // 类型不匹配，视为逻辑错误（可能是配置被修改了，或者数据脏了）
-            _ => Err(Error::from(format!(
+            _ => Err(WatchError::invalid_input(format!(
                 "Comparison mode mismatch: New is {:?}, but Current is {:?}",
                 self.timestamp, current.timestamp
-            ))),
+            ))
+            .in_op("release.compare")),
         }
     }
 }

@@ -1,7 +1,7 @@
 use super::super::adapter::tests::MockEnv;
 use super::super::adapter::{MonitorClient, RegistryStorageAdapter};
 use super::*;
-use crate::error::AppError;
+use crate::error::{WatchError, WatchResult};
 use async_trait::async_trait;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -44,23 +44,23 @@ struct TestStorage {
 
 #[async_trait(?Send)]
 impl RegistryStorageAdapter for TestStorage {
-    async fn add(&self, key: &str) -> Result<()> {
+    async fn add(&self, key: &str) -> WatchResult<()> {
         self.ctx.push_log(format!("storage:add:{}", key));
         self.ctx.storage_keys.borrow_mut().insert(key.to_string());
         Ok(())
     }
 
-    async fn remove(&self, key: &str) -> Result<bool> {
+    async fn remove(&self, key: &str) -> WatchResult<bool> {
         self.ctx.push_log(format!("storage:remove:{}", key));
         Ok(self.ctx.storage_keys.borrow_mut().remove(key))
     }
 
-    async fn list(&self) -> Result<Vec<String>> {
+    async fn list(&self) -> WatchResult<Vec<String>> {
         self.ctx.push_log("storage:list".to_string());
         Ok(self.ctx.storage_keys.borrow().iter().cloned().collect())
     }
 
-    async fn contains(&self, key: &str) -> Result<bool> {
+    async fn contains(&self, key: &str) -> WatchResult<bool> {
         self.ctx.push_log(format!("storage:contains:{}", key));
         Ok(self.ctx.storage_keys.borrow().contains(key))
     }
@@ -72,7 +72,7 @@ struct TestMonitorClient {
 
 #[async_trait(?Send)]
 impl MonitorClient for TestMonitorClient {
-    async fn setup(&self, unique_key: &str, config: &ProjectConfig) -> Result<()> {
+    async fn setup(&self, unique_key: &str, config: &ProjectConfig) -> WatchResult<()> {
         self.ctx.push_log(format!("monitor:setup:{}", unique_key));
         self.ctx
             .monitor_configs
@@ -81,27 +81,27 @@ impl MonitorClient for TestMonitorClient {
         Ok(())
     }
 
-    async fn stop(&self, unique_key: &str) -> Result<()> {
+    async fn stop(&self, unique_key: &str) -> WatchResult<()> {
         self.ctx.push_log(format!("monitor:stop:{}", unique_key));
         Ok(())
     }
 
-    async fn get_config(&self, unique_key: &str) -> Result<Option<ProjectConfig>> {
+    async fn get_config(&self, unique_key: &str) -> WatchResult<Option<ProjectConfig>> {
         self.ctx
             .push_log(format!("monitor:get_config:{}", unique_key));
         if self.ctx.fail_get_config_keys.borrow().contains(unique_key) {
-            return Err(AppError::store("Simulated failure"));
+            return Err(WatchError::store("Simulated failure"));
         }
         Ok(self.ctx.monitor_configs.borrow().get(unique_key).cloned())
     }
 
-    async fn switch(&self, unique_key: &str, paused: bool) -> Result<()> {
+    async fn switch(&self, unique_key: &str, paused: bool) -> WatchResult<()> {
         self.ctx
             .push_log(format!("monitor:switch:{}:{}", unique_key, paused));
         Ok(())
     }
 
-    async fn trigger_check(&self, unique_key: &str) -> Result<()> {
+    async fn trigger_check(&self, unique_key: &str) -> WatchResult<()> {
         self.ctx
             .push_log(format!("monitor:trigger_check:{}", unique_key));
         Ok(())

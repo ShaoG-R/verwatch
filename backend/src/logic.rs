@@ -1,4 +1,4 @@
-use crate::error::{AppError, Result};
+use crate::error::{WatchError, WatchResult};
 use crate::repository::Registry;
 use verwatch_shared::{CreateProjectRequest, DeleteTarget, ProjectConfig};
 
@@ -18,63 +18,92 @@ impl<'a, R: Registry> AdminLogic<'a, R> {
     }
 
     /// 列出所有项目
-    pub async fn list_projects(&self) -> Result<Vec<ProjectConfig>> {
-        self.registry.list().await
+    pub async fn list_projects(&self) -> WatchResult<Vec<ProjectConfig>> {
+        self.registry
+            .list()
+            .await
+            .map_err(|e| e.in_op("admin.list"))
     }
 
     /// 创建项目
     /// 1. 校验输入
     /// 2. 构建 ProjectConfig
     /// 3. 通过 Registry 注册 (Registry 内部会调用 Monitor.setup)
-    pub async fn create_project(&self, req: CreateProjectRequest) -> Result<ProjectConfig> {
+    pub async fn create_project(&self, req: CreateProjectRequest) -> WatchResult<ProjectConfig> {
         // 业务校验：防止空仓库名
         if req.base_config.upstream_repo.trim().is_empty() {
-            return Err(AppError::invalid_input("Upstream repo cannot be empty"));
+            return Err(WatchError::invalid_input("Upstream repo cannot be empty")
+                .in_op("admin.create.validate"));
         }
 
         let config = ProjectConfig::new(req);
+        let unique_key = config.unique_key.clone();
 
         // 检查是否已存在
-        if self.registry.is_registered(&config.unique_key).await? {
-            return Err(AppError::conflict(format!(
-                "Project '{}' already exists",
-                config.unique_key
-            )));
+        if self
+            .registry
+            .is_registered(&unique_key)
+            .await
+            .map_err(|e| e.in_op_with("admin.create.check", &unique_key))?
+        {
+            return Err(
+                WatchError::conflict(format!("Project '{}' already exists", unique_key))
+                    .in_op("admin.create"),
+            );
         }
 
         // 注册 (内部调用 Monitor.setup)
-        self.registry.register(&config).await?;
+        self.registry
+            .register(&config)
+            .await
+            .map_err(|e| e.in_op_with("admin.create.register", &unique_key))?;
 
         Ok(config)
     }
 
     /// 删除项目
     /// 通过 Registry 注销 (Registry 内部会调用 Monitor.stop)
-    pub async fn delete_project(&self, target: DeleteTarget) -> Result<bool> {
-        self.registry.unregister(&target.id).await
+    pub async fn delete_project(&self, target: DeleteTarget) -> WatchResult<bool> {
+        self.registry
+            .unregister(&target.id)
+            .await
+            .map_err(|e| e.in_op_with("admin.delete", &target.id))
     }
 
     /// 弹出项目 (获取并删除)
-    pub async fn pop_project(&self, target: DeleteTarget) -> Result<Option<ProjectConfig>> {
+    pub async fn pop_project(&self, target: DeleteTarget) -> WatchResult<Option<ProjectConfig>> {
         // 先获取
-        let projects = self.registry.list().await?;
+        let projects = self
+            .registry
+            .list()
+            .await
+            .map_err(|e| e.in_op_with("admin.pop.list", &target.id))?;
         let config = projects.into_iter().find(|c| c.unique_key == target.id);
 
         if let Some(ref c) = config {
-            self.registry.unregister(&c.unique_key).await?;
+            self.registry
+                .unregister(&c.unique_key)
+                .await
+                .map_err(|e| e.in_op_with("admin.pop.unregister", &c.unique_key))?;
         }
 
         Ok(config)
     }
 
     /// 切换监控状态
-    pub async fn switch_monitor(&self, unique_key: String, paused: bool) -> Result<bool> {
-        self.registry.switch_monitor(&unique_key, paused).await
+    pub async fn switch_monitor(&self, unique_key: String, paused: bool) -> WatchResult<bool> {
+        self.registry
+            .switch_monitor(&unique_key, paused)
+            .await
+            .map_err(|e| e.in_op_with("admin.switch", &unique_key))
     }
 
     /// 手动触发检查
-    pub async fn trigger_check(&self, unique_key: String) -> Result<bool> {
-        self.registry.trigger_check(&unique_key).await
+    pub async fn trigger_check(&self, unique_key: String) -> WatchResult<bool> {
+        self.registry
+            .trigger_check(&unique_key)
+            .await
+            .map_err(|e| e.in_op_with("admin.trigger", &unique_key))
     }
 }
 
@@ -84,7 +113,7 @@ impl<'a, R: Registry> AdminLogic<'a, R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{error::AppErrorStatus, repository::tests::MockRegistry};
+    use crate::{error::WatchErrorStatus, repository::tests::MockRegistry};
     use verwatch_shared::{BaseConfig, ComparisonMode, TimeConfig};
 
     fn make_request(upstream_repo: &str) -> CreateProjectRequest {
@@ -126,8 +155,8 @@ mod tests {
         let result = logic.create_project(make_request("")).await;
         assert!(matches!(
             result,
-            Err(AppError {
-                status: AppErrorStatus::InvalidInput,
+            Err(WatchError {
+                status: WatchErrorStatus::InvalidInput,
                 ..
             })
         ));
@@ -145,8 +174,8 @@ mod tests {
         let result = logic.create_project(make_request("rust")).await;
         assert!(matches!(
             result,
-            Err(AppError {
-                status: AppErrorStatus::Conflict,
+            Err(WatchError {
+                status: WatchErrorStatus::Conflict,
                 ..
             })
         ));
