@@ -10,7 +10,8 @@ use lol_alloc::{AssumeSingleThreaded, FreeListAllocator};
 static ALLOCATOR: AssumeSingleThreaded<FreeListAllocator> =
     unsafe { AssumeSingleThreaded::new(FreeListAllocator::new()) };
 
+mod panic_hook;
+
 pub fn main() {
-    console_error_panic_hook::set_once();
     mount_to_body(App);
 }

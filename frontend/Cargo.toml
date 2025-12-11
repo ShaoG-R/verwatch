@@ -4,8 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-leptos = { version = "0.8", features = ["csr"] }
-console_error_panic_hook = "0.1"
+leptos = { version = "0.8", default-features = false, features = ["csr"] }
 verwatch-shared = { path = "../shared" }
 lol_alloc = "0.4"
 wasm-bindgen = "0.2"
