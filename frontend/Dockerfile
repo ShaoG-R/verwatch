@@ -31,8 +31,8 @@ COPY frontend ./frontend
 # Download latest CSS/JS assets (replace any existing)
 WORKDIR /app/frontend
 RUN rm -rf assets && mkdir -p assets && \
-    curl -o assets/daisyui.css https://cdn.jsdelivr.net/npm/daisyui@5/daisyui.css && \
-    curl -o assets/tailwind.js https://unpkg.com/@tailwindcss/browser@4
+    curl -fsSL -o assets/daisyui.css https://cdn.jsdelivr.net/npm/daisyui@5/daisyui.css && \
+    curl -fsSL -o assets/tailwind.js https://unpkg.com/@tailwindcss/browser@4
 
 # Build
 RUN trunk build --release
