@@ -1,9 +1,3 @@
-// Use talc as the global allocator for WASM
-#[cfg(target_arch = "wasm32")]
-#[global_allocator]
-static ALLOCATOR: talc::Talck<talc::locking::AssumeUnlockable, talc::ClaimOnOom> =
-    talc::Talc::new(unsafe { talc::ClaimOnOom::new(talc::Span::empty()) }).lock();
-
 use worker::*;
 
 pub mod error;
