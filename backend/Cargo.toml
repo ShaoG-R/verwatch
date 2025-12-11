@@ -19,7 +19,8 @@ verwatch-shared = { path = "../shared" }
 tokio = { version = "1.48.0", features = ["full"] }
 
 [profile.release]
-opt-level = 3     # 最高性能优化 (类似 C++ -O3)
-lto = "fat"       # 跨所有 crate 的最大化优化
-codegen-units = 1 # 让编译器看到全局代码进行优化
-panic = "abort" # 可选，选择 abort 以减少不必要的错误处理开销
+opt-level = "s" 
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
