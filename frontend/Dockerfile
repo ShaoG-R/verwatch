@@ -15,8 +15,9 @@ RUN pacman -Syu --noconfirm && \
 RUN rustup default stable && \
     rustup target add wasm32-unknown-unknown
 
-# Add cargo bin to PATH
+# Add cargo bin to PATH and enable bulk-memory for WASM
 ENV PATH="/root/.cargo/bin:${PATH}"
+ENV RUSTFLAGS="-C target-feature=+bulk-memory"
 
 # Install trunk and wasm-bindgen-cli
 RUN cargo install trunk wasm-bindgen-cli --locked
