@@ -1,3 +1,4 @@
+use crate::api::VerWatchApi;
 use crate::auth::{AuthContext, logout, use_auth};
 use crate::components::add_project_dialog::AddProjectDialog;
 use crate::components::icons::*;
@@ -5,21 +6,227 @@ use gloo_timers::callback::Interval;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::hooks::use_navigate;
-use std::cell::RefCell;
-use std::rc::Rc;
 use verwatch_shared::{CreateProjectRequest, MonitorState, ProjectConfig, chrono::Utc};
+
+// --- Logic Layer: Dashboard Store ---
+
+#[derive(Clone)]
+pub struct DashboardStore {
+    pub projects: Signal<Vec<ProjectConfig>>,
+    pub loading: Signal<bool>,
+    pub tick: Signal<u64>,
+    pub notification: Signal<Option<(String, bool)>>,
+    // Actions
+    pub refresh: Callback<()>,
+    pub add_project: Callback<CreateProjectRequest>,
+    pub delete_project: Callback<String>,
+    pub switch_monitor: Callback<(String, bool)>,
+    pub trigger_check: Callback<String>,
+}
+
+// --- API Action Runner: 消除重复的 API 调用逻辑 ---
+
+#[derive(Clone, Copy)]
+struct ApiActionRunner {
+    auth_state: ReadSignal<crate::auth::AuthState>,
+    set_notification: WriteSignal<Option<(String, bool)>>,
+    load_projects: Callback<()>,
+}
+
+impl ApiActionRunner {
+    /// 执行 API 操作，成功后刷新列表并显示通知
+    fn run<T, F, Fut>(
+        self,
+        api_call: F,
+        on_success: impl FnOnce(T) -> String + 'static,
+        error_prefix: &'static str,
+    ) where
+        F: FnOnce(VerWatchApi) -> Fut + 'static,
+        Fut: std::future::Future<Output = Result<T, String>> + 'static,
+        T: 'static,
+    {
+        if let Some(api) = self.auth_state.get().api.clone() {
+            let set_notification = self.set_notification;
+            let load_projects = self.load_projects;
+            spawn_local(async move {
+                match api_call(api).await {
+                    Ok(result) => {
+                        set_notification.set(Some((on_success(result), false)));
+                        load_projects.run(());
+                    }
+                    Err(e) => {
+                        set_notification.set(Some((format!("{}: {}", error_prefix, e), true)))
+                    }
+                }
+            });
+        }
+    }
+}
+
+pub fn use_dashboard_store() -> DashboardStore {
+    use_context::<DashboardStore>().expect("DashboardStore must be used within a DashboardProvider")
+}
+
+pub fn use_provide_dashboard_store() -> DashboardStore {
+    let (projects, set_projects) = signal(Vec::<ProjectConfig>::new());
+    let (loading, set_loading) = signal(true);
+    let (notification, set_notification) = signal(Option::<(String, bool)>::None);
+    let (tick, set_tick) = signal(0u64);
+
+    let AuthContext(auth_state, _) = use_auth();
+
+    // --- Action Implementations ---
+
+    let load_projects = Callback::new(move |_| {
+        let state = auth_state.get();
+        if let Some(api) = state.api.as_ref() {
+            let api = api.clone();
+            set_loading.set(true);
+            spawn_local(async move {
+                match api.get_projects().await {
+                    Ok(data) => set_projects.set(data),
+                    Err(e) => set_notification.set(Some((format!("加载项目失败: {}", e), true))),
+                }
+                set_loading.set(false);
+            });
+        }
+    });
+
+    // 创建 runner 实例，封装共享依赖
+    let runner = ApiActionRunner {
+        auth_state,
+        set_notification,
+        load_projects,
+    };
+
+    let add_project = Callback::new(move |req| {
+        runner.run(
+            |api| async move { api.add_project(req).await },
+            |_| "监控添加成功".to_string(),
+            "添加监控失败",
+        );
+    });
+
+    let delete_project = Callback::new(move |id: String| {
+        runner.run(
+            |api| async move { api.delete_project(id).await },
+            |deleted| {
+                if deleted {
+                    "监控已删除"
+                } else {
+                    "监控不存在 (已清理)"
+                }
+                .to_string()
+            },
+            "删除监控失败",
+        );
+    });
+
+    let switch_monitor = Callback::new(move |(id, paused): (String, bool)| {
+        runner.run(
+            move |api| async move { api.switch_monitor(id, paused).await },
+            |new_state| {
+                if new_state {
+                    "监控已暂停"
+                } else {
+                    "监控已恢复"
+                }
+                .to_string()
+            },
+            "切换状态失败",
+        );
+    });
+
+    let trigger_check = Callback::new(move |id: String| {
+        runner.run(
+            |api| async move { api.trigger_check(id).await },
+            |_| "检查已触发".to_string(),
+            "触发失败",
+        );
+    });
+
+    // --- Timer & Auto Refresh Logic ---
+    Effect::new(move |_| {
+        if !auth_state.get().is_authenticated {
+            return;
+        }
+
+        // Start 1s Tick
+        let handle = Interval::new(1000, move || {
+            set_tick.update(|t| *t = t.wrapping_add(1));
+        });
+
+        let interval_handle = StoredValue::new_local(handle);
+
+        let cleanup_tick = tick.clone();
+
+        // Auto refresh check
+        Effect::new(move |_| {
+            let _ = cleanup_tick.get();
+            let list = projects.get();
+            let now = Utc::now();
+
+            // Allow refresh if any project is expired
+            let needs_refresh = list.iter().any(|p| {
+                matches!(&p.state, MonitorState::Running { next_check_at } if *next_check_at <= now)
+            });
+
+            // Prevent concurrent refreshes
+            if needs_refresh && !loading.get_untracked() {
+                load_projects.run(());
+            }
+        });
+
+        // Auto-clear notification
+        Effect::new(move |_| {
+            if notification.get().is_some() {
+                set_timeout(
+                    move || set_notification.set(None),
+                    std::time::Duration::from_secs(3),
+                );
+            }
+        });
+
+        on_cleanup(move || {
+            interval_handle.dispose();
+        });
+    });
+
+    // Initial Load when authenticated
+    Effect::new(move |_| {
+        let state = auth_state.get();
+        if state.is_authenticated && !state.is_loading {
+            // Only load if empty? Or always refresh? Let's just always load on component mount/auth
+            load_projects.run(());
+        }
+    });
+
+    let store = DashboardStore {
+        projects: projects.into(),
+        loading: loading.into(),
+        tick: tick.into(),
+        notification: notification.into(),
+        refresh: load_projects,
+        add_project,
+        delete_project,
+        switch_monitor,
+        trigger_check,
+    };
+
+    provide_context(store.clone());
+    store
+}
+
+// --- UI Layer: Components ---
 
 #[component]
 pub fn DashboardPage() -> impl IntoView {
-    let AuthContext(auth_state, set_auth) = use_auth();
+    // 1. Initialize Store (Provides Context)
+    let store = use_provide_dashboard_store();
     let navigate = use_navigate();
+    let AuthContext(auth_state, set_auth) = use_auth();
 
-    let (projects, set_projects) = signal(Vec::<ProjectConfig>::new());
-    let (loading_projects, set_loading_projects) = signal(true);
-    let (notification, set_notification) = signal(Option::<(String, bool)>::None);
-    // 用于触发倒计时刷新的信号 (每秒更新)
-    let (tick, set_tick) = signal(0u64);
-
+    // Redirect if not authenticated
     Effect::new({
         let navigate = navigate.clone();
         move |_| {
@@ -30,217 +237,28 @@ pub fn DashboardPage() -> impl IntoView {
         }
     });
 
-    let load_projects = move || {
-        let state = auth_state.get();
-        if let Some(api) = state.api.as_ref() {
-            let api = api.clone();
-            set_loading_projects.set(true);
-            spawn_local(async move {
-                match api.get_projects().await {
-                    Ok(data) => set_projects.set(data),
-                    Err(e) => set_notification.set(Some((format!("加载项目失败: {}", e), true))),
-                }
-                set_loading_projects.set(false);
-            });
-        }
-    };
-
-    Effect::new(move |_| {
-        let state = auth_state.get();
-        if state.is_authenticated && !state.is_loading {
-            load_projects();
-        }
-    });
-
-    // 每秒更新 tick 信号，用于驱动倒计时显示
-    let interval_handle: Rc<RefCell<Option<Interval>>> = Rc::new(RefCell::new(None));
-    {
-        let interval_handle = interval_handle.clone();
-        Effect::new(move |_| {
-            let state = auth_state.get();
-            if state.is_authenticated && !state.is_loading {
-                let interval = Interval::new(1000, move || {
-                    set_tick.update(|t| *t = t.wrapping_add(1));
-                });
-                *interval_handle.borrow_mut() = Some(interval);
-            } else {
-                // 未认证时清除定时器
-                *interval_handle.borrow_mut() = None;
-            }
-        });
-    }
-
-    // 记录上次自动刷新的时间戳，避免在短时间内重复刷新
-    let last_auto_refresh: Rc<RefCell<Option<i64>>> = Rc::new(RefCell::new(None));
-
-    // 监听 tick 和 projects，检查是否有项目倒计时已结束
-    {
-        let last_auto_refresh = last_auto_refresh.clone();
-        Effect::new(move |_| {
-            let _ = tick.get(); // 订阅 tick 更新
-            let projects_list = projects.get();
-            let now = Utc::now();
-            let now_ts = now.timestamp();
-
-            // 找出是否有已过期的 running 项目
-            let has_expired = projects_list.iter().any(|p| {
-                if let MonitorState::Running { next_check_at } = &p.state {
-                    *next_check_at <= now
-                } else {
-                    false
-                }
-            });
-
-            // 检查是否需要刷新：有过期项目且距离上次刷新超过 5 秒
-            let should_refresh = if has_expired && !loading_projects.get() {
-                let last_refresh = *last_auto_refresh.borrow();
-                match last_refresh {
-                    None => true,
-                    Some(ts) => now_ts - ts >= 5, // 至少间隔 5 秒
-                }
-            } else {
-                false
-            };
-
-            if should_refresh {
-                *last_auto_refresh.borrow_mut() = Some(now_ts);
-                // 延迟 0.5s 后刷新
-                set_timeout(
-                    move || load_projects(),
-                    std::time::Duration::from_millis(500),
-                );
-            }
-        });
-    }
-
-    let handle_add_project = move |req: CreateProjectRequest| {
-        let state = auth_state.get();
-        if let Some(api) = state.api.as_ref() {
-            let api = api.clone();
-            spawn_local(async move {
-                match api.add_project(req).await {
-                    Ok(_) => {
-                        set_notification.set(Some(("监控添加成功".to_string(), false)));
-                        load_projects();
-                    }
-                    Err(e) => set_notification.set(Some((format!("添加监控失败: {}", e), true))),
-                }
-            });
-        }
-    };
-
-    let handle_delete = move |id: String| {
-        let state = auth_state.get();
-        if let Some(api) = state.api.as_ref() {
-            let api = api.clone();
-            spawn_local(async move {
-                match api.delete_project(id.clone()).await {
-                    Ok(deleted) => {
-                        let msg = if deleted {
-                            "监控已删除"
-                        } else {
-                            "监控不存在 (已清理)"
-                        };
-                        set_notification.set(Some((msg.to_string(), false)));
-                        set_projects.update(|list| list.retain(|p| p.unique_key != id));
-                    }
-                    Err(e) => set_notification.set(Some((format!("删除监控失败: {}", e), true))),
-                }
-            });
-        }
-    };
-
-    let handle_switch_monitor = move |id: String, paused: bool| {
-        let state = auth_state.get();
-        if let Some(api) = state.api.as_ref() {
-            let api = api.clone();
-            spawn_local(async move {
-                match api.switch_monitor(id.clone(), paused).await {
-                    Ok(new_paused_state) => {
-                        set_notification.set(Some((
-                            if new_paused_state {
-                                "监控已暂停".to_string()
-                            } else {
-                                "监控已恢复".to_string()
-                            },
-                            false,
-                        )));
-                        // 重新加载列表以获取最新状态（包括 MonitorState 的详细信息）
-                        load_projects();
-                    }
-                    Err(e) => {
-                        set_notification.set(Some((format!("切换状态失败: {}", e), true)));
-                    }
-                }
-            });
-        }
-    };
-
-    let handle_trigger_check = move |id: String| {
-        let state = auth_state.get();
-        if let Some(api) = state.api.as_ref() {
-            let api = api.clone();
-            spawn_local(async move {
-                match api.trigger_check(id.clone()).await {
-                    Ok(_) => {
-                        set_notification.set(Some(("检查已触发".to_string(), false)));
-                        // 重新加载列表以获取最新的倒计时信息
-                        load_projects();
-                    }
-                    Err(e) => {
-                        set_notification.set(Some((format!("触发失败: {}", e), true)));
-                    }
-                }
-            });
-        }
-    };
-
-    let on_logout = move |_| {
-        logout(set_auth);
-        navigate("/", Default::default());
-    };
-
-    Effect::new(move |_| {
-        if notification.get().is_some() {
-            set_timeout(
-                move || set_notification.set(None),
-                std::time::Duration::from_secs(3),
-            );
-        }
-    });
-
-    let total_monitors = move || projects.with(|p| p.len());
     let backend_url = Signal::derive(move || auth_state.get().backend_url);
 
     view! {
         <div class="h-screen bg-base-200 p-4 md:p-8 font-sans flex flex-col overflow-hidden">
             <div class="max-w-7xl mx-auto w-full flex-1 flex flex-col gap-8 min-h-0">
-                <NotificationToast notification=notification />
+                <NotificationToast notification=store.notification.into() />
 
                 <DashboardNavbar
                     backend_url=backend_url
-                    on_add_project=Callback::new(handle_add_project)
-                    on_logout=Callback::new(on_logout)
+                    on_logout=Callback::new(move |_| { logout(set_auth); navigate("/", Default::default()); })
                 />
 
-                <DashboardStats total_monitors=Signal::derive(total_monitors) />
+                <DashboardStats />
 
-                <ProjectsTable
-                    projects=projects
-                    loading=loading_projects
-                    tick=tick
-                    on_refresh=Callback::new(move |_| load_projects())
-                    on_switch_monitor=Callback::new(move |(id, p)| handle_switch_monitor(id, p))
-                    on_trigger_check=Callback::new(handle_trigger_check)
-                    on_delete=Callback::new(handle_delete)
-                />
+                <ProjectsTable />
             </div>
         </div>
     }
 }
 
 #[component]
-fn NotificationToast(notification: ReadSignal<Option<(String, bool)>>) -> impl IntoView {
+fn NotificationToast(notification: Signal<Option<(String, bool)>>) -> impl IntoView {
     view! {
         <Show when=move || notification.get().is_some()>
             <div class="toast toast-top toast-end z-50">
@@ -258,9 +276,10 @@ fn NotificationToast(notification: ReadSignal<Option<(String, bool)>>) -> impl I
 #[component]
 fn DashboardNavbar(
     backend_url: Signal<String>,
-    on_add_project: Callback<CreateProjectRequest>,
     on_logout: Callback<leptos::ev::MouseEvent>,
 ) -> impl IntoView {
+    let store = use_dashboard_store();
+
     view! {
         <div class="navbar bg-base-100 rounded-box shadow-xl">
             <div class="flex-1 gap-2">
@@ -271,7 +290,7 @@ fn DashboardNavbar(
                 </span>
             </div>
             <div class="flex-none gap-2">
-                <AddProjectDialog on_add=move |req| on_add_project.run(req) />
+                <AddProjectDialog on_add=move |req| store.add_project.run(req) />
                 <button on:click=move |e| on_logout.run(e) class="btn btn-outline btn-error gap-2">
                     <LogOut attr:class="h-4 w-4" /> "断开连接"
                 </button>
@@ -281,7 +300,10 @@ fn DashboardNavbar(
 }
 
 #[component]
-fn DashboardStats(total_monitors: Signal<usize>) -> impl IntoView {
+fn DashboardStats() -> impl IntoView {
+    let store = use_dashboard_store();
+    let total_monitors = move || store.projects.with(|p| p.len());
+
     view! {
         <div class="stats shadow w-full stats-vertical md:stats-horizontal bg-base-100">
             <div class="stat">
@@ -310,16 +332,10 @@ fn DashboardStats(total_monitors: Signal<usize>) -> impl IntoView {
 }
 
 #[component]
-fn ProjectsTable(
-    projects: ReadSignal<Vec<ProjectConfig>>,
-    loading: ReadSignal<bool>,
-    tick: ReadSignal<u64>,
-    on_refresh: Callback<()>,
-    on_switch_monitor: Callback<(String, bool)>,
-    on_trigger_check: Callback<String>,
-    on_delete: Callback<String>,
-) -> impl IntoView {
-    let total_monitors = move || projects.with(|p| p.len());
+fn ProjectsTable() -> impl IntoView {
+    let store = use_dashboard_store();
+
+    let total_monitors = move || store.projects.with(|p| p.len());
 
     view! {
         <div class="card bg-base-100 shadow-xl flex-1 flex flex-col min-h-0">
@@ -329,8 +345,8 @@ fn ProjectsTable(
                         <h3 class="card-title">"活跃监控"</h3>
                         <p class="text-base-content/70 text-sm">"管理您的仓库监控列表。目前共有 " {total_monitors} " 个监控项。"</p>
                     </div>
-                    <button on:click=move |_| on_refresh.run(()) disabled=move || loading.get() class="btn btn-ghost btn-circle">
-                        <RefreshCw attr:class=move || if loading.get() { "h-5 w-5 animate-spin" } else { "h-5 w-5" } />
+                    <button on:click=move |_| store.refresh.run(()) disabled=move || store.loading.get() class="btn btn-ghost btn-circle">
+                        <RefreshCw attr:class=move || if store.loading.get() { "h-5 w-5 animate-spin" } else { "h-5 w-5" } />
                     </button>
                 </div>
 
@@ -347,14 +363,14 @@ fn ProjectsTable(
                             </tr>
                         </thead>
                         <tbody>
-                            <Show when=move || total_monitors() == 0 && !loading.get()>
+                            <Show when=move || total_monitors() == 0 && !store.loading.get()>
                                 <tr>
                                     <td colspan="5" class="text-center py-8 text-base-content/50">
                                         "未配置监控。添加一个以开始。"
                                     </td>
                                 </tr>
                             </Show>
-                                <Show when=move || loading.get() && total_monitors() == 0>
+                                <Show when=move || store.loading.get() && total_monitors() == 0>
                                 <tr>
                                     <td colspan="5" class="text-center py-8 text-base-content/50">
                                         <span class="loading loading-spinner loading-md"></span> " 加载中..."
@@ -362,9 +378,8 @@ fn ProjectsTable(
                                 </tr>
                             </Show>
                             <For
-                                each=move || projects.get()
+                                each=move || store.projects.get()
                                 key=|p| {
-                                    // 包含完整的状态信息，确保状态变化时重新渲染
                                     match &p.state {
                                         MonitorState::Paused => format!("{}|paused", p.unique_key),
                                         MonitorState::Running { next_check_at } => {
@@ -373,15 +388,7 @@ fn ProjectsTable(
                                     }
                                 }
                                 children=move |project| {
-                                    view! {
-                                        <ProjectRow
-                                            project=project
-                                            tick=tick
-                                            on_switch_monitor=on_switch_monitor
-                                            on_trigger_check=on_trigger_check
-                                            on_delete=on_delete
-                                        />
-                                    }
+                                    view! { <ProjectRow project=project /> }
                                 }
                             />
                         </tbody>
@@ -421,22 +428,17 @@ impl From<&ProjectConfig> for ProjectRowDisplay {
 }
 
 #[component]
-fn ProjectRow(
-    project: ProjectConfig,
-    tick: ReadSignal<u64>,
-    on_switch_monitor: Callback<(String, bool)>,
-    on_trigger_check: Callback<String>,
-    on_delete: Callback<String>,
-) -> impl IntoView {
+fn ProjectRow(project: ProjectConfig) -> impl IntoView {
+    let store = use_dashboard_store();
     let id = project.unique_key.clone();
     let is_paused = project.state.is_paused();
     let state_for_countdown = project.state.clone();
     let state_for_badge = project.state.clone();
     let display = ProjectRowDisplay::from(&project);
 
-    // 计算倒计时显示
+    // Countdown Text
     let countdown_text = move || {
-        let _ = tick.get(); // 订阅 tick 以便每秒更新
+        let _ = store.tick.get(); // Subscribe to tick
         match &state_for_countdown {
             MonitorState::Paused => "--".to_string(),
             MonitorState::Running { next_check_at } => {
@@ -461,7 +463,6 @@ fn ProjectRow(
         }
     };
 
-    // 预先克隆 ID 用于回调
     let (id_pause, id_check, id_del) = (id.clone(), id.clone(), id.clone());
 
     view! {
@@ -494,7 +495,7 @@ fn ProjectRow(
             </td>
             <td class="hidden md:table-cell">
                 <div class=move || {
-                    let _ = tick.get();
+                    let _ = store.tick.get();
                     let base = "badge badge-sm font-mono";
                     match &state_for_badge {
                         MonitorState::Paused => format!("{} badge-ghost", base),
@@ -525,7 +526,7 @@ fn ProjectRow(
                     </div>
                     <ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52">
                         <li>
-                            <a on:click=move |_| on_switch_monitor.run((id_pause.clone(), !is_paused))>
+                            <a on:click=move |_| store.switch_monitor.run((id_pause.clone(), !is_paused))>
                                 <Show when=move || is_paused
                                         fallback=|| view! { <Pause attr:class="mr-2 h-4 w-4" /> "暂停监控" }>
                                         <Play attr:class="mr-2 h-4 w-4" /> "恢复监控"
@@ -533,12 +534,12 @@ fn ProjectRow(
                             </a>
                         </li>
                         <li>
-                            <a on:click=move |_| on_trigger_check.run(id_check.clone())>
+                            <a on:click=move |_| store.trigger_check.run(id_check.clone())>
                                 <RefreshCw attr:class="mr-2 h-4 w-4" /> "立即触发检查"
                             </a>
                         </li>
                         <li>
-                            <a on:click=move |_| on_delete.run(id_del.clone()) class="text-error hover:bg-error/10">
+                            <a on:click=move |_| store.delete_project.run(id_del.clone()) class="text-error hover:bg-error/10">
                                 <Trash2 attr:class="mr-2 h-4 w-4" />
                                 "删除"
                             </a>
