@@ -27,7 +27,10 @@ impl From<serde_wasm_bindgen::Error> for Error {
 
 /// Serialize a Rust data structure into a JsValue
 pub fn to_value<T: Serialize>(value: &T) -> Result<JsValue, Error> {
-    serde_wasm_bindgen::to_value(value).map_err(Error::from)
+    // Configure serializer to handle large numbers as JS numbers (fixes BigInt issues with JSON.stringify)
+    let serializer =
+        serde_wasm_bindgen::Serializer::new().serialize_large_number_types_as_bigints(false);
+    value.serialize(&serializer).map_err(Error::from)
 }
 
 /// Deserialize a JsValue into a Rust data structure

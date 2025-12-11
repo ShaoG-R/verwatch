@@ -62,7 +62,7 @@ impl HttpRequest {
 
     pub fn with_json_body<T: Serialize>(mut self, body: &T) -> WatchResult<Self> {
         self.body = Some(
-            verwatch_shared::serde_helper::to_json_string(body)
+            serde_json_wasm::to_string(body)
                 .map_err(|e| WatchError::serialization(e.to_string()))?,
         );
         Ok(self)
@@ -76,7 +76,7 @@ pub struct HttpResponse {
 
 impl HttpResponse {
     pub fn json<T: DeserializeOwned>(&self) -> WatchResult<T> {
-        verwatch_shared::serde_helper::from_json_string(&self.body)
+        serde_json_wasm::from_str(&self.body)
             .map_err(|e| WatchError::serialization(e.to_string()).in_op("http.json"))
     }
 }

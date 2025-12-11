@@ -7,7 +7,7 @@ use verwatch_shared::{
 };
 
 // 辅助函数：序列化 JSON
-use verwatch_shared::serde_helper;
+use crate::serde_helper;
 
 // 辅助函数：序列化 JSON
 fn to_json<T: Serialize>(value: &T) -> Result<String, String> {

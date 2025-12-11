@@ -6,6 +6,7 @@ mod components {
     mod icons;
     pub mod login;
 }
+mod serde_helper;
 
 use crate::auth::{AuthContext, AuthState, init_auth};
 use crate::components::dashboard::DashboardPage;
