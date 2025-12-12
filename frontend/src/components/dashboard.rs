@@ -12,7 +12,7 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_name = formatCountdown)]
-    fn format_countdown(secs: i64) -> String;
+    fn format_countdown(secs: f64) -> String;
 }
 
 // --- Logic Layer: Dashboard Store ---
@@ -443,7 +443,7 @@ fn ProjectRow(project: ProjectConfig) -> impl IntoView {
             MonitorState::Paused => "--".to_string(),
             MonitorState::Running { next_check_at } => {
                 let now = Date::now_timestamp();
-                let secs = (*next_check_at - now).as_secs() as i64;
+                let secs = (*next_check_at - now).as_secs() as f64;
                 format_countdown(secs)
             }
         }
