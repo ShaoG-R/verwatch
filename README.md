@@ -219,7 +219,7 @@ jobs:
 
       - name: Receive Version Info
         run: |
-          echo "Upstream released new version: ${{ github.event.client_payload.version }}"
+          echo "Upstream released new version: ${{ github.event.client_payload.version }}" #注意该version相当于release_tag
           
       # 在这里添加您的构建、合并或发布逻辑
 ```
