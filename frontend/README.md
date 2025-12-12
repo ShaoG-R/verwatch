@@ -157,7 +157,7 @@ jobs:
 *   `index.html`: 应用入口 HTML。
 *   `Cargo.toml`: Rust 依赖定义。
 *   `package.json`: Node.js 依赖和 CSS 构建脚本。
-*   `src/input.css`: Tailwind CSS 入口文件。
+*   `input.css`: Tailwind CSS 入口文件。
 
 ## 样式说明
 
