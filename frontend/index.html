@@ -6,14 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>VerWatch</title>
 
-    <!-- Tailwind CSS V4 & DaisyUI 5 (bundled at build time)
-         Original sources:
-         - https://cdn.jsdelivr.net/npm/daisyui@5/daisyui.css
-         - https://unpkg.com/@tailwindcss/browser@4
+    <!-- Tailwind CSS V4 & DaisyUI 5 (optimized build via npm run build:css)
+         Generated from: ./src/input.css
+         Tree shaking: scans ./src/**/*.rs for used classes (~87% size reduction)
     -->
-    <link data-trunk rel="css" href="assets/daisyui.css" />
-    <link data-trunk rel="copy-file" href="assets/tailwind.js" />
-    <script src="tailwind.js"></script>
+    <link data-trunk rel="css" href="assets/output.css" />
 
     <link data-trunk rel="rust" data-wasm-opt="z"
         data-wasm-opt-params="--enable-bulk-memory --enable-nontrapping-float-to-int" />

@@ -22,6 +22,13 @@ VerWatch 的前端控制面板，基于 Rust + Leptos + TailwindCSS (DaisyUI) �
     cargo install trunk
     ```
 
+4.  **Node.js**: 用于构建优化的 CSS 文件。
+    ```bash
+    # 安装 npm 依赖
+    cd frontend
+    npm install
+    ```
+
 ## 开发运行 (Running Locally)
 
 1.  进入 `frontend` 目录：
@@ -29,24 +36,34 @@ VerWatch 的前端控制面板，基于 Rust + Leptos + TailwindCSS (DaisyUI) �
     cd frontend
     ```
 
-2.  启动开发服务器：
+2.  首次运行或修改了 Tailwind/DaisyUI 类后，需要构建 CSS：
+    ```bash
+    npm run build:css
+    ```
+    或者开启 CSS 监听模式（自动重新构建）：
+    ```bash
+    npm run watch:css
+    ```
+
+3.  启动开发服务器：
     ```bash
     trunk serve
     ```
-    或者自动并在浏览器打开：
+    或者自动在浏览器打开：
     ```bash
     trunk serve --open
     ```
 
 *   默认服务地址为：`http://127.0.0.1:8080`
 *   **后端连接**: 默认情况下，前端可能需要连接到后端 Worker。请在登录界面输入您的 VerWatch 后端 URL 和 Admin Secret。
-*   **热重载**:Trunk 支持热重载，修改代码后浏览器会自动刷新。
+*   **热重载**: Trunk 支持热重载，修改代码后浏览器会自动刷新。
 
 ## 构建发布 (Build for Production)
 
 构建优化后的生产环境静态文件：
 
 ```bash
+npm run build:css  # 构建精简的 CSS
 trunk build --release
 ```
 
@@ -104,10 +121,19 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Install Trunk
         run: cargo install trunk --locked
 
-      - name: Build
+      - name: Build CSS
+        working-directory: frontend
+        run: npm install && npm run build:css
+
+      - name: Build WASM
         working-directory: frontend
         run: trunk build --release
 
@@ -128,14 +154,24 @@ jobs:
     *   `components/`: Leptos UI 组件 (`dashboard.rs`, `login.rs` 等)
     *   `api.rs`: 与后端 Worker 通信的 API 客户端
     *   `auth.rs`: 处理登录状态和 LocalStorage
-*   `index.html`: 应用入口 HTML，包含 TailwindCSS 和 DaisyUI 的 CDN 引用。
+*   `index.html`: 应用入口 HTML。
 *   `Cargo.toml`: Rust 依赖定义。
+*   `package.json`: Node.js 依赖和 CSS 构建脚本。
+*   `src/input.css`: Tailwind CSS 入口文件。
 
 ## 样式说明
 
-本项目为了简化开发流程，直接在 `index.html` 中通过 CDN 引入了 **TailwindCSS v4** 和 **DaisyUI v5**。
-*   无需配置 `npm install` 或 `postcss`。
-*   **注意**:这也意味着开发和运行时客户端需要能够访问 `cdn.jsdelivr.net` 和 `unpkg.com`。
+本项目使用 **Tailwind CSS v4** + **DaisyUI v5** 作为样式框架，采用构建时优化：
+
+*   **Tree Shaking**: Tailwind 会扫描 `./src/**/*.rs` 和 `./index.html` 中使用的类名，只生成实际使用的 CSS。
+*   **精简输出**: 原始 DaisyUI CSS 约 **968KB**，优化后仅约 **126KB**（减少 ~87%）。
+*   **无运行时依赖**: 不需要加载 CDN 资源，所有样式都在构建时打包。
+
+构建命令：
+```bash
+npm run build:css   # 构建压缩的 CSS
+npm run watch:css   # 开发时监听文件变化自动重建
+```
 
 ## 依赖关系
 

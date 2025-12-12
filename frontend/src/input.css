@@ -1,0 +1,6 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+/* 扫描 Rust 源代码中的 class 字符串 */
+@source "../index.html";
+@source "./**/*.rs";

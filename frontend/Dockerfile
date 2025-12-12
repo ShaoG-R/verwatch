@@ -9,6 +9,8 @@ RUN pacman -Syu --noconfirm && \
     pkg-config \
     openssl \
     curl \
+    nodejs \
+    npm \
     && pacman -Scc --noconfirm
 
 # Setup Rust
@@ -29,13 +31,11 @@ WORKDIR /app
 COPY shared ./shared
 COPY frontend ./frontend
 
-# Download latest CSS/JS assets (replace any existing)
+# Build optimized CSS with Tailwind (scans .rs files, only includes used classes)
 WORKDIR /app/frontend
-RUN rm -rf assets && mkdir -p assets && \
-    curl -fsSL -o assets/daisyui.css https://cdn.jsdelivr.net/npm/daisyui@5/daisyui.css && \
-    curl -fsSL -o assets/tailwind.js https://unpkg.com/@tailwindcss/browser@4
+RUN npm install && npm run build:css
 
-# Build
+# Build WASM
 RUN trunk build --release --frozen
 
 # Export stage - only output the dist directory

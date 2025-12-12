@@ -1,0 +1,14 @@
+{
+  "name": "verwatch-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build:css": "npx @tailwindcss/cli -i ./src/input.css -o ./assets/output.css --minify",
+    "watch:css": "npx @tailwindcss/cli -i ./src/input.css -o ./assets/output.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4.0.0",
+    "daisyui": "^5.0.0",
+    "@tailwindcss/cli": "^4.0.0"
+  }
+}
