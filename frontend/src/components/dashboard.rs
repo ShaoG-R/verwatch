@@ -1,8 +1,8 @@
 use crate::api::VerWatchApi;
-use crate::auth::{AuthContext, logout, use_auth};
+use crate::auth::{logout, use_auth};
 use crate::components::add_project_dialog::AddProjectDialog;
 use crate::components::icons::*;
-use crate::web::{Interval, use_navigate};
+use crate::web::Interval;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use verwatch_shared::{CreateProjectRequest, Date, MonitorState, ProjectConfig};
@@ -80,7 +80,8 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
     let (notification, set_notification) = signal(Option::<(String, bool)>::None);
     let (tick, set_tick) = signal(0u64);
 
-    let AuthContext(auth_state, _) = use_auth();
+    let auth = use_auth();
+    let auth_state = auth.state;
 
     // --- Action Implementations ---
 
@@ -230,19 +231,11 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
 pub fn DashboardPage() -> impl IntoView {
     // 1. Initialize Store (Provides Context)
     let store = use_provide_dashboard_store();
-    let navigate = use_navigate();
-    let AuthContext(auth_state, set_auth) = use_auth();
+    let auth = use_auth();
+    let auth_state = auth.state;
 
-    // Redirect if not authenticated
-    Effect::new({
-        let navigate = navigate.clone();
-        move |_| {
-            let state = auth_state.get();
-            if !state.is_loading && !state.is_authenticated {
-                navigate("/");
-            }
-        }
-    });
+    // 注意：不再需要手动重定向逻辑
+    // 路由服务会监听认证状态变化并自动处理重定向
 
     let backend_url = Signal::derive(move || auth_state.get().backend_url);
 
@@ -253,7 +246,7 @@ pub fn DashboardPage() -> impl IntoView {
 
                 <DashboardNavbar
                     backend_url=backend_url
-                    on_logout=Callback::new(move |_| { logout(set_auth); navigate("/"); })
+                    on_logout=Callback::new(move |_| { logout(&auth); })
                 />
 
                 <DashboardStats />

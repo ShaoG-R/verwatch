@@ -1,41 +1,35 @@
-use crate::auth::AuthContext;
-use crate::auth::login;
-use crate::auth::use_auth;
+//! 登录页面组件
+//!
+//! 纯粹的 UI 组件，不直接处理路由逻辑。
+//! 导航由路由服务根据认证状态变化自动处理。
+
+use crate::auth::{login, use_auth};
 use crate::components::icons::ShieldCheck;
-use crate::web::use_navigate;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 #[component]
 pub fn LoginPage() -> impl IntoView {
-    let AuthContext(auth_state, set_auth) = use_auth();
-    let navigate = use_navigate();
+    let auth = use_auth();
 
-    let (url, set_url) = signal(auth_state.get().backend_url);
+    // 从认证状态获取初始 URL
+    let initial_url = auth.state.get_untracked().backend_url;
+
+    let (url, set_url) = signal(initial_url);
     let (secret, set_secret) = signal(String::new());
     let (is_submitting, set_is_submitting) = signal(false);
     let (error_msg, set_error_msg) = signal(Option::<String>::None);
 
-    // 如果已认证则重定向
-    Effect::new({
-        let navigate = navigate.clone();
-        move |_| {
-            let state = auth_state.get();
-            if !state.is_loading && state.is_authenticated {
-                navigate("/dashboard");
-            }
-        }
-    });
-
-    // 使用派生信号检查加载状态以在需要时提前返回
-    // 尽管在这个单页应用中，我们通常只是渲染。
-    // 原始代码在加载时返回 null。
-    let is_loading = move || auth_state.get().is_loading;
+    // 检查加载状态以显示加载指示器
+    let is_loading = move || auth.state.get().is_loading;
 
     view! {
-        <Show when=move || !is_loading() fallback=|| view! { <div class="flex items-center justify-center min-h-screen"><span class="loading loading-spinner loading-lg text-primary"></span></div> }>
+        <Show when=move || !is_loading() fallback=|| view! {
+            <div class="flex items-center justify-center min-h-screen">
+                <span class="loading loading-spinner loading-lg text-primary"></span>
+            </div>
+        }>
             {
-                let navigate = navigate.clone();
                 let on_submit = move |ev: leptos::web_sys::SubmitEvent| {
                     ev.prevent_default();
                     if url.get().is_empty() || secret.get().is_empty() {
@@ -46,18 +40,19 @@ pub fn LoginPage() -> impl IntoView {
                     set_is_submitting.set(true);
                     set_error_msg.set(None);
 
-                    let navigate = navigate.clone();
+                    // 在进入异步上下文前获取值（避免在非响应式上下文中访问信号）
+                    let url_value = url.get_untracked();
+                    let secret_value = secret.get_untracked();
+
                     spawn_local(async move {
-                        let success = login(set_auth, url.get(), secret.get()).await;
-                        if success {
-                            navigate("/dashboard");
-                        } else {
+                        let success = login(&auth, url_value, secret_value).await;
+                        if !success {
                             set_error_msg.set(Some("连接失败。请检查 URL 和密钥。".to_string()));
                         }
+                        // 成功时不需要手动导航 - 路由服务会监听认证状态变化并自动重定向
                         set_is_submitting.set(false);
                     });
                 };
-
 
                 view! {
                     <div class="hero min-h-screen bg-base-200">
