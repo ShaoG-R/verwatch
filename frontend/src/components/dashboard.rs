@@ -2,11 +2,10 @@ use crate::api::VerWatchApi;
 use crate::auth::{logout, use_auth};
 use crate::components::add_project_dialog::AddProjectDialog;
 use crate::components::icons::*;
-use crate::web::Interval;
-use leptos::prelude::*;
-use leptos::task::spawn_local;
+use silex::prelude::*;
 use verwatch_shared::{CreateProjectRequest, Date, MonitorState, ProjectConfig};
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::spawn_local;
 
 // JS 格式化函数绑定 (定义在 index.html)
 #[wasm_bindgen]
@@ -19,10 +18,10 @@ extern "C" {
 
 #[derive(Clone)]
 pub struct DashboardStore {
-    pub projects: Signal<Vec<ProjectConfig>>,
-    pub loading: Signal<bool>,
-    pub tick: Signal<u64>,
-    pub notification: Signal<Option<(String, bool)>>,
+    pub projects: ReadSignal<Vec<ProjectConfig>>,
+    pub loading: ReadSignal<bool>,
+    pub tick: ReadSignal<u64>,
+    pub notification: ReadSignal<Option<(String, bool)>>,
     // Actions
     pub refresh: Callback<()>,
     pub add_project: Callback<CreateProjectRequest>,
@@ -59,7 +58,7 @@ impl ApiActionRunner {
                 match api_call(api).await {
                     Ok(result) => {
                         set_notification.set(Some((on_success(result), false)));
-                        load_projects.run(());
+                        load_projects.call(());
                     }
                     Err(e) => {
                         set_notification.set(Some((format!("{}: {}", error_prefix, e), true)))
@@ -71,7 +70,7 @@ impl ApiActionRunner {
 }
 
 pub fn use_dashboard_store() -> DashboardStore {
-    use_context::<DashboardStore>().expect("DashboardStore must be used within a DashboardProvider")
+    expect_context::<DashboardStore>()
 }
 
 pub fn use_provide_dashboard_store() -> DashboardStore {
@@ -159,18 +158,14 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
             return;
         }
 
-        // Start 1s Tick
-        let handle = Interval::new(1000, move || {
+        // Start 1s Tick using auto-cleanup use_interval
+        let _ = use_interval(std::time::Duration::from_secs(1), move || {
             set_tick.update(|t| *t = t.wrapping_add(1));
         });
 
-        let interval_handle = StoredValue::new_local(handle);
-
-        let cleanup_tick = tick.clone();
-
         // Auto refresh check
         Effect::new(move |_| {
-            let _ = cleanup_tick.get();
+            let _ = tick.get();
             let list = projects.get();
             let now = Date::now_timestamp();
 
@@ -181,22 +176,17 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
 
             // Prevent concurrent refreshes
             if needs_refresh && !loading.get_untracked() {
-                load_projects.run(());
+                load_projects.call(());
             }
         });
 
         // Auto-clear notification
         Effect::new(move |_| {
             if notification.get().is_some() {
-                set_timeout(
-                    move || set_notification.set(None),
-                    std::time::Duration::from_secs(3),
-                );
+                let _ = use_timeout(std::time::Duration::from_secs(3), move || {
+                    set_notification.set(None)
+                });
             }
-        });
-
-        on_cleanup(move || {
-            interval_handle.dispose();
         });
     });
 
@@ -204,16 +194,15 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
     Effect::new(move |_| {
         let state = auth_state.get();
         if state.is_authenticated && !state.is_loading {
-            // Only load if empty? Or always refresh? Let's just always load on component mount/auth
-            load_projects.run(());
+            load_projects.call(());
         }
     });
 
     let store = DashboardStore {
-        projects: projects.into(),
-        loading: loading.into(),
-        tick: tick.into(),
-        notification: notification.into(),
+        projects,
+        loading,
+        tick,
+        notification,
         refresh: load_projects,
         add_project,
         delete_project,
@@ -228,7 +217,7 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
 // --- UI Layer: Components ---
 
 #[component]
-pub fn DashboardPage() -> impl IntoView {
+pub fn DashboardPage() -> impl View {
     // 1. Initialize Store (Provides Context)
     let store = use_provide_dashboard_store();
     let auth = use_auth();
@@ -239,164 +228,192 @@ pub fn DashboardPage() -> impl IntoView {
 
     let backend_url = Signal::derive(move || auth_state.get().backend_url);
 
-    view! {
-        <div class="h-screen bg-base-200 p-4 md:p-8 font-sans flex flex-col overflow-hidden">
-            <div class="max-w-7xl mx-auto w-full flex-1 flex flex-col gap-8 min-h-0">
-                <NotificationToast notification=store.notification.into() />
-
-                <DashboardNavbar
-                    backend_url=backend_url
-                    on_logout=Callback::new(move |_| { logout(&auth); })
-                />
-
-                <DashboardStats />
-
-                <ProjectsTable />
-            </div>
-        </div>
-    }
+    div![
+        NotificationToast().notification(store.notification),
+        DashboardNavbar()
+            .backend_url(backend_url)
+            .on_logout(Callback::new(move |_: web_sys::MouseEvent| {
+                logout(&auth);
+            })),
+        DashboardStats(),
+        ProjectsTable()
+    ]
+    .class("max-w-7xl mx-auto w-full flex-1 flex flex-col gap-8 min-h-0")
+    .style("display: flex; flex-direction: column;")
 }
 
 #[component]
-fn NotificationToast(notification: Signal<Option<(String, bool)>>) -> impl IntoView {
-    view! {
-        <Show when=move || notification.get().is_some()>
-            <div class="toast toast-top toast-end z-50">
-                <div class=move || {
-                    let (_, is_err) = notification.get().unwrap();
-                    if is_err { "alert alert-error shadow-lg" } else { "alert alert-success shadow-lg" }
-                }>
-                    <span>{move || notification.get().unwrap().0}</span>
-                </div>
-            </div>
-        </Show>
-    }
+fn NotificationToast(notification: ReadSignal<Option<(String, bool)>>) -> impl View {
+    Show::new(notification.map(|n| n.is_some()), move || {
+        div(
+            div(span(notification.map(|n| n.clone().unwrap().0))).class(notification.map(|n| {
+                let (_, is_err) = n.clone().unwrap();
+                if is_err {
+                    "alert alert-error shadow-lg"
+                } else {
+                    "alert alert-success shadow-lg"
+                }
+            })),
+        )
+        .class("toast toast-top toast-end z-50")
+    })
 }
 
 #[component]
 fn DashboardNavbar(
     backend_url: Signal<String>,
-    on_logout: Callback<leptos::ev::MouseEvent>,
-) -> impl IntoView {
+    #[prop(into)] on_logout: Callback<web_sys::MouseEvent>,
+) -> impl View {
     let store = use_dashboard_store();
 
-    view! {
-        <div class="navbar bg-base-100 rounded-box shadow-xl">
-            <div class="flex-1 gap-2">
-                <Radio attr:class="text-primary h-6 w-6 animate-pulse" />
-                <a class="btn btn-ghost text-xl">"VerWatch 控制面板"</a>
-                <span class="badge badge-neutral hidden md:inline-flex">
-                    "已连接至 " {backend_url}
-                </span>
-            </div>
-            <div class="flex-none gap-2">
-                <AddProjectDialog on_add=move |req| store.add_project.run(req) />
-                <button on:click=move |e| on_logout.run(e) class="btn btn-outline btn-error gap-2">
-                    <LogOut attr:class="h-4 w-4" /> "断开连接"
-                </button>
-            </div>
-        </div>
-    }
+    div![
+        div![
+            Radio()
+                .style("height: 24px; width: 24px;")
+                .class("text-primary animate-pulse"),
+            a("VerWatch 控制面板").class("btn btn-ghost text-xl"),
+            span(("已连接至 ", backend_url)).class("badge badge-neutral hidden md:inline-flex")
+        ]
+        .class("flex-1 gap-2"),
+        div![
+            AddProjectDialog().on_add(Callback::new(move |req| store.add_project.call(req))),
+            button((LogOut().style("height: 16px; width: 16px;"), " 断开连接"))
+                .on(event::click, move |e| on_logout.call(e))
+                .class("btn btn-outline btn-error gap-2")
+        ]
+        .class("flex-none gap-2")
+    ]
+    .class("navbar bg-base-100 rounded-box shadow-xl")
 }
 
 #[component]
-fn DashboardStats() -> impl IntoView {
+fn DashboardStats() -> impl View {
     let store = use_dashboard_store();
     let total_monitors = move || store.projects.with(|p| p.len());
 
-    view! {
-        <div class="stats shadow w-full stats-vertical md:stats-horizontal bg-base-100">
-            <div class="stat">
-                <div class="stat-figure text-primary">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-8 h-8 stroke-current"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                </div>
-                <div class="stat-title">"监控总数"</div>
-                <div class="stat-value text-primary">{total_monitors}</div>
-            </div>
-
-            <div class="stat">
-                <div class="stat-figure text-success">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="inline-block w-8 h-8 stroke-current"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                </div>
-                <div class="stat-title">"系统状态"</div>
-                <div class="stat-value text-success">"运行中"</div>
-            </div>
-
-            <div class="stat">
-                    <div class="stat-title">"更新策略"</div>
-                    <div class="stat-value text-secondary text-2xl">"自动 (定时)"</div>
-                    <div class="stat-desc">"Workers 自动调度"</div>
-            </div>
-        </div>
-    }
+    div![
+        div![
+            div(svg(path()
+                .attr("stroke-linecap", "round")
+                .attr("stroke-linejoin", "round")
+                .attr("stroke-width", "2")
+                .attr(
+                    "d",
+                    "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                ))
+            .attr("xmlns", "http://www.w3.org/2000/svg")
+            .attr("fill", "none")
+            .attr("viewBox", "0 0 24 24")
+            .class("inline-block w-8 h-8 stroke-current"))
+            .class("stat-figure text-primary"),
+            div("监控总数").class("stat-title"),
+            div(total_monitors).class("stat-value text-primary")
+        ]
+        .class("stat"),
+        div![
+            div(svg(path()
+                .attr("stroke-linecap", "round")
+                .attr("stroke-linejoin", "round")
+                .attr("stroke-width", "2")
+                .attr("d", "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"))
+            .attr("xmlns", "http://www.w3.org/2000/svg")
+            .attr("fill", "none")
+            .attr("viewBox", "0 0 24 24")
+            .class("inline-block w-8 h-8 stroke-current"))
+            .class("stat-figure text-success"),
+            div("系统状态").class("stat-title"),
+            div("运行中").class("stat-value text-success")
+        ]
+        .class("stat"),
+        div![
+            div("更新策略").class("stat-title"),
+            div("自动 (定时)").class("stat-value text-secondary text-2xl"),
+            div("Workers 自动调度").class("stat-desc")
+        ]
+        .class("stat")
+    ]
+    .class("stats shadow w-full stats-vertical md:stats-horizontal bg-base-100")
 }
 
 #[component]
-fn ProjectsTable() -> impl IntoView {
+fn ProjectsTable() -> impl View {
     let store = use_dashboard_store();
-
     let total_monitors = move || store.projects.with(|p| p.len());
 
-    view! {
-        <div class="card bg-base-100 shadow-xl flex-1 flex flex-col min-h-0">
-            <div class="card-body p-0 flex flex-col h-full overflow-hidden">
-                <div class="flex items-center justify-between p-6 pb-2 flex-none">
-                    <div>
-                        <h3 class="card-title">"活跃监控"</h3>
-                        <p class="text-base-content/70 text-sm">"管理您的仓库监控列表。目前共有 " {total_monitors} " 个监控项。"</p>
-                    </div>
-                    <button on:click=move |_| store.refresh.run(()) disabled=move || store.loading.get() class="btn btn-ghost btn-circle">
-                        <RefreshCw attr:class=move || if store.loading.get() { "h-5 w-5 animate-spin" } else { "h-5 w-5" } />
-                    </button>
-                </div>
-
-                <div class="overflow-auto w-full flex-1">
-                    <table class="table table-zebra w-full">
-                        <thead>
-                            <tr>
-                                <th>"上游"</th>
-                                <th>"目标"</th>
-                                <th class="hidden md:table-cell">"触发模式"</th>
-                                <th class="hidden md:table-cell">"下次检查"</th>
-                                <th class="hidden lg:table-cell">"密钥"</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <Show when=move || total_monitors() == 0 && !store.loading.get()>
-                                <tr>
-                                    <td colspan="5" class="text-center py-8 text-base-content/50">
-                                        "未配置监控。添加一个以开始。"
-                                    </td>
-                                </tr>
-                            </Show>
-                                <Show when=move || store.loading.get() && total_monitors() == 0>
-                                <tr>
-                                    <td colspan="5" class="text-center py-8 text-base-content/50">
-                                        <span class="loading loading-spinner loading-md"></span> " 加载中..."
-                                    </td>
-                                </tr>
-                            </Show>
-                            <For
-                                each=move || store.projects.get()
-                                key=|p| {
-                                    match &p.state {
-                                        MonitorState::Paused => format!("{}|paused", p.unique_key),
-                                        MonitorState::Running { next_check_at } => {
-                                            format!("{}|running|{}", p.unique_key, next_check_at.as_millis_i64())
-                                        }
-                                    }
-                                }
-                                children=move |project| {
-                                    view! { <ProjectRow project=project /> }
-                                }
-                            />
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-    }
+    div(div![
+        div![
+            div![
+                h3("活跃监控").class("card-title"),
+                p((
+                    "管理您的仓库监控列表。目前共有 ",
+                    total_monitors,
+                    " 个监控项。"
+                ))
+                .class("text-base-content/70 text-sm")
+            ],
+            button(RefreshCw().style(store.loading.map(|l| {
+                if l {
+                    "height: 20px; width: 20px; animation: spin 1s linear infinite;"
+                } else {
+                    "height: 20px; width: 20px;"
+                }
+            })))
+            .on(event::click, move |_| store.refresh.call(()))
+            .disabled(store.loading)
+            .class("btn btn-ghost btn-circle")
+        ]
+        .class("flex items-center justify-between p-6 pb-2 flex-none"),
+        div(table![
+            thead(tr((
+                th("上游"),
+                th("目标"),
+                th("触发模式").class("hidden md:table-cell"),
+                th("下次检查").class("hidden md:table-cell"),
+                th("密钥").class("hidden lg:table-cell"),
+                th(())
+            ))),
+            tbody((
+                // 空状态
+                Show::new(
+                    move || total_monitors() == 0 && !store.loading.get(),
+                    || tr(td("未配置监控。添加一个以开始。")
+                        .attr("colspan", "5")
+                        .class("text-center py-8 text-base-content/50"))
+                ),
+                // 加载状态
+                Show::new(
+                    move || store.loading.get() && total_monitors() == 0,
+                    || tr(td((
+                        span(()).class("loading loading-spinner loading-md"),
+                        " 加载中..."
+                    ))
+                    .attr("colspan", "5")
+                    .class("text-center py-8 text-base-content/50"))
+                ),
+                // 项目列表
+                For::new(
+                    store.projects,
+                    |p| {
+                        match &p.state {
+                            MonitorState::Paused => format!("{}|paused", p.unique_key),
+                            MonitorState::Running { next_check_at } => {
+                                format!(
+                                    "{}|running|{}",
+                                    p.unique_key,
+                                    next_check_at.as_millis_i64()
+                                )
+                            }
+                        }
+                    },
+                    move |project| ProjectRow().project(project)
+                )
+            ))
+        ]
+        .class("table table-zebra w-full"))
+        .class("overflow-x-auto w-full")
+    ]
+    .class("card-body p-0 flex flex-col"))
+    .class("card bg-base-100 shadow-xl min-h-0")
 }
 
 struct ProjectRowDisplay {
@@ -428,7 +445,7 @@ impl From<&ProjectConfig> for ProjectRowDisplay {
 }
 
 #[component]
-fn ProjectRow(project: ProjectConfig) -> impl IntoView {
+fn ProjectRow(project: ProjectConfig) -> impl View {
     let store = use_dashboard_store();
     let id = project.unique_key.clone();
     let is_paused = project.state.is_paused();
@@ -451,88 +468,101 @@ fn ProjectRow(project: ProjectConfig) -> impl IntoView {
 
     let (id_pause, id_check, id_del) = (id.clone(), id.clone(), id.clone());
 
-    view! {
-        <tr
-            class:opacity-50=is_paused
-            class:grayscale=is_paused
-            class:bg-base-200=is_paused
-        >
-            <td>
-                <div class="flex items-center gap-2 font-mono text-sm font-bold">
-                    <Github attr:class="h-4 w-4 opacity-50" />
-                    {display.upstream}
-                    <Show when=move || is_paused>
-                        <span class="badge badge-warning badge-sm gap-1">
-                            <Pause attr:class="h-3 w-3" /> "已暂停"
-                        </span>
-                    </Show>
-                </div>
-            </td>
-            <td>
-                <div class="flex items-center gap-2 font-mono text-sm opacity-70">
-                    <GitFork attr:class="h-4 w-4 opacity-50" />
-                    {display.target}
-                </div>
-            </td>
-            <td class="hidden md:table-cell">
-                <div class="badge badge-accent badge-outline">
-                    {display.mode}
-                </div>
-            </td>
-            <td class="hidden md:table-cell">
-                <div class=move || {
-                    let _ = store.tick.get();
-                    let base = "badge badge-sm font-mono";
-                    match &state_for_badge {
-                        MonitorState::Paused => format!("{} badge-ghost", base),
-                        MonitorState::Running { next_check_at } => {
-                            let now = Date::now_timestamp();
-                            let secs = (*next_check_at - now).as_secs() as i64;
-                            if secs <= 60 {
-                                format!("{} badge-error animate-pulse", base)
-                            } else if secs <= 300 {
-                                format!("{} badge-warning", base)
-                            } else {
-                                format!("{} badge-info", base)
-                            }
+    tr![
+        td(div![
+            Github().style("height: 16px; width: 16px; opacity: 0.5;"),
+            display.upstream,
+            Show::new(
+                move || is_paused,
+                || {
+                    span((Pause().style("height: 12px; width: 12px;"), " 已暂停"))
+                        .class("badge badge-warning badge-sm gap-1")
+                }
+            )
+        ]
+        .class("flex items-center gap-2 font-mono text-sm font-bold")),
+        td(div![
+            GitFork().style("height: 16px; width: 16px; opacity: 0.5;"),
+            display.target
+        ]
+        .class("flex items-center gap-2 font-mono text-sm opacity-70")),
+        td(div(display.mode).class("badge badge-accent badge-outline"))
+            .class("hidden md:table-cell"),
+        td(div![
+            Clock().style("height: 12px; width: 12px; margin-right: 4px;"),
+            countdown_text
+        ]
+        .class(move || {
+            let _ = store.tick.get();
+            let base = "badge badge-sm font-mono";
+            match &state_for_badge {
+                MonitorState::Paused => format!("{} badge-ghost", base),
+                MonitorState::Running { next_check_at } => {
+                    let now = Date::now_timestamp();
+                    let secs = (*next_check_at - now).as_secs() as i64;
+                    if secs <= 60 {
+                        format!("{} badge-error animate-pulse", base)
+                    } else if secs <= 300 {
+                        format!("{} badge-warning", base)
+                    } else {
+                        format!("{} badge-info", base)
+                    }
+                }
+            }
+        }))
+        .class("hidden md:table-cell"),
+        td(display.secret).class("hidden lg:table-cell font-mono text-xs opacity-50"),
+        td(div![
+            div(MoreHorizontal().style("height: 16px; width: 16px;"))
+                .attr("tabindex", "0")
+                .attr("role", "button")
+                .class("btn btn-ghost btn-sm btn-square"),
+            ul![
+                li(a(Dynamic::bind(
+                    move || is_paused,
+                    |paused| {
+                        if paused {
+                            div![
+                                Play().style("height: 16px; width: 16px; margin-right: 8px;"),
+                                "恢复监控"
+                            ]
+                            .into_any()
+                        } else {
+                            div![
+                                Pause().style("height: 16px; width: 16px; margin-right: 8px;"),
+                                "暂停监控"
+                            ]
+                            .into_any()
                         }
                     }
-                }>
-                    <Clock attr:class="h-3 w-3 mr-1" />
-                    {countdown_text}
-                </div>
-            </td>
-            <td class="hidden lg:table-cell font-mono text-xs opacity-50">
-                {display.secret}
-            </td>
-            <td>
-                <div class="dropdown dropdown-end">
-                    <div tabindex="0" role="button" class="btn btn-ghost btn-sm btn-square">
-                        <MoreHorizontal attr:class="h-4 w-4" />
-                    </div>
-                    <ul tabindex="0" class="dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52">
-                        <li>
-                            <a on:click=move |_| store.switch_monitor.run((id_pause.clone(), !is_paused))>
-                                <Show when=move || is_paused
-                                        fallback=|| view! { <Pause attr:class="mr-2 h-4 w-4" /> "暂停监控" }>
-                                        <Play attr:class="mr-2 h-4 w-4" /> "恢复监控"
-                                </Show>
-                            </a>
-                        </li>
-                        <li>
-                            <a on:click=move |_| store.trigger_check.run(id_check.clone())>
-                                <RefreshCw attr:class="mr-2 h-4 w-4" /> "立即触发检查"
-                            </a>
-                        </li>
-                        <li>
-                            <a on:click=move |_| store.delete_project.run(id_del.clone()) class="text-error hover:bg-error/10">
-                                <Trash2 attr:class="mr-2 h-4 w-4" />
-                                "删除"
-                            </a>
-                        </li>
-                    </ul>
-                </div>
-            </td>
-        </tr>
-    }
+                ))
+                .on(event::click, move |_| store
+                    .switch_monitor
+                    .call((id_pause.clone(), !is_paused)))),
+                li(a((
+                    RefreshCw().style("height: 16px; width: 16px; margin-right: 8px;"),
+                    "立即触发检查"
+                ))
+                .on(event::click, move |_| store
+                    .trigger_check
+                    .call(id_check.clone()))),
+                li(a((
+                    Trash2().style("height: 16px; width: 16px; margin-right: 8px;"),
+                    "删除"
+                ))
+                .class("text-error hover:bg-error/10")
+                .on(event::click, move |_| store
+                    .delete_project
+                    .call(id_del.clone())))
+            ]
+            .attr("tabindex", "0")
+            .class("dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52")
+        ]
+        .class("dropdown dropdown-end"))
+    ]
+    .classes(classes![
+        "opacity-50" => move || is_paused,
+        "grayscale" => move || is_paused,
+        "bg-base-200" => move || is_paused
+    ])
 }

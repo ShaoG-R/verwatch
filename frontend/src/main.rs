@@ -1,4 +1,4 @@
-use leptos::prelude::*;
+use silex::prelude::*;
 use verwatch_frontend::App;
 
 // Use lol_alloc as the global allocator for smaller WASM size
@@ -14,5 +14,6 @@ mod panic_hook;
 
 pub fn main() {
     panic_hook::register();
-    mount_to_body(App);
+    setup_global_error_handlers();
+    mount_to_body(rx! { App() });
 }

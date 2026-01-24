@@ -5,7 +5,7 @@
 
 use crate::api::VerWatchApi;
 use crate::web::LocalStorage;
-use leptos::prelude::*;
+use silex::prelude::*;
 
 const STORAGE_URL_KEY: &str = "verwatch_url";
 
@@ -38,12 +38,6 @@ impl AuthContext {
     pub fn new() -> Self {
         let (state, set_state) = signal(AuthState::default());
         Self { state, set_state }
-    }
-
-    /// 获取认证状态信号（用于路由服务注入）
-    pub fn is_authenticated_signal(&self) -> Signal<bool> {
-        let state = self.state;
-        Signal::derive(move || state.get().is_authenticated)
     }
 }
 
