@@ -5,7 +5,6 @@ use crate::components::icons::*;
 use silex::prelude::*;
 use verwatch_shared::{CreateProjectRequest, Date, MonitorState, ProjectConfig};
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::spawn_local;
 
 // JS 格式化函数绑定 (定义在 index.html)
 #[wasm_bindgen]
@@ -18,55 +17,15 @@ extern "C" {
 
 #[derive(Clone)]
 pub struct DashboardStore {
-    pub projects: ReadSignal<Vec<ProjectConfig>>,
-    pub loading: ReadSignal<bool>,
+    pub resource: Resource<Vec<ProjectConfig>, String>,
     pub tick: ReadSignal<u64>,
     pub notification: ReadSignal<Option<(String, bool)>>,
     // Actions
     pub refresh: Callback<()>,
-    pub add_project: Callback<CreateProjectRequest>,
-    pub delete_project: Callback<String>,
-    pub switch_monitor: Callback<(String, bool)>,
-    pub trigger_check: Callback<String>,
-}
-
-// --- API Action Runner: 消除重复的 API 调用逻辑 ---
-
-#[derive(Clone, Copy)]
-struct ApiActionRunner {
-    auth_state: ReadSignal<crate::auth::AuthState>,
-    set_notification: WriteSignal<Option<(String, bool)>>,
-    load_projects: Callback<()>,
-}
-
-impl ApiActionRunner {
-    /// 执行 API 操作，成功后刷新列表并显示通知
-    fn run<T, F, Fut>(
-        self,
-        api_call: F,
-        on_success: impl FnOnce(T) -> String + 'static,
-        error_prefix: &'static str,
-    ) where
-        F: FnOnce(VerWatchApi) -> Fut + 'static,
-        Fut: std::future::Future<Output = Result<T, String>> + 'static,
-        T: 'static,
-    {
-        if let Some(api) = self.auth_state.get().api.clone() {
-            let set_notification = self.set_notification;
-            let load_projects = self.load_projects;
-            spawn_local(async move {
-                match api_call(api).await {
-                    Ok(result) => {
-                        set_notification.set(Some((on_success(result), false)));
-                        load_projects.call(());
-                    }
-                    Err(e) => {
-                        set_notification.set(Some((format!("{}: {}", error_prefix, e), true)))
-                    }
-                }
-            });
-        }
-    }
+    pub add_project: Mutation<CreateProjectRequest, ProjectConfig, String>,
+    pub delete_project: Mutation<String, (String, bool), String>,
+    pub switch_monitor: Mutation<(String, bool), (bool, bool), String>,
+    pub trigger_check: Mutation<String, (), String>,
 }
 
 pub fn use_dashboard_store() -> DashboardStore {
@@ -74,85 +33,131 @@ pub fn use_dashboard_store() -> DashboardStore {
 }
 
 pub fn use_provide_dashboard_store() -> DashboardStore {
-    let (projects, set_projects) = signal(Vec::<ProjectConfig>::new());
-    let (loading, set_loading) = signal(true);
     let (notification, set_notification) = signal(Option::<(String, bool)>::None);
     let (tick, set_tick) = signal(0u64);
 
     let auth = use_auth();
     let auth_state = auth.state;
 
-    // --- Action Implementations ---
+    // Helper for notifications
+    let notify = move |msg: String, is_err: bool| {
+        set_notification.set(Some((msg, is_err)));
+    };
 
-    let load_projects = Callback::new(move |_| {
-        let state = auth_state.get();
-        if let Some(api) = state.api.as_ref() {
-            let api = api.clone();
-            set_loading.set(true);
-            spawn_local(async move {
-                match api.get_projects().await {
-                    Ok(data) => set_projects.set(data),
-                    Err(e) => set_notification.set(Some((format!("加载项目失败: {}", e), true))),
-                }
-                set_loading.set(false);
-            });
+    // --- Resource Implementation ---
+    let resource: Resource<Vec<ProjectConfig>, String> = Resource::new(
+        move || auth_state.get().api,
+        move |api_opt: Option<VerWatchApi>| async move {
+            if let Some(api) = api_opt {
+                api.get_projects().await.map_err(|e| e.to_string())
+            } else {
+                Ok(Vec::new())
+            }
+        },
+    );
+
+    // Error handling for resource
+    Effect::new(move |_| {
+        if let ResourceState::Error(err) = resource.state.get() {
+            notify(format!("加载项目失败: {}", err), true);
         }
     });
 
-    // 创建 runner 实例，封装共享依赖
-    let runner = ApiActionRunner {
-        auth_state,
-        set_notification,
-        load_projects,
-    };
+    let refresh = Callback::new(move |_| resource.refetch());
 
-    let add_project = Callback::new(move |req| {
-        runner.run(
-            |api| async move { api.add_project(req).await },
-            |_| "监控添加成功".to_string(),
-            "添加监控失败",
-        );
+    // --- Mutations ---
+
+    // 1. Add Project
+    let add_project = Mutation::new(move |req: CreateProjectRequest| {
+        let api = auth_state.get().api;
+        async move {
+            let api = api.ok_or("未连接到服务器".to_string())?;
+            api.add_project(req).await
+        }
     });
 
-    let delete_project = Callback::new(move |id: String| {
-        runner.run(
-            |api| async move { api.delete_project(id).await },
-            |deleted| {
-                if deleted {
-                    "监控已删除"
-                } else {
-                    "监控不存在 (已清理)"
-                }
-                .to_string()
-            },
-            "删除监控失败",
-        );
+    Effect::new(move |_| {
+        if let MutationState::Success(new_project) = add_project.state.get() {
+            notify("监控添加成功".to_string(), false);
+            // Optimization: Local update
+            resource.update(|list| list.push(new_project.clone()));
+        } else if let MutationState::Error(err) = add_project.state.get() {
+            notify(format!("添加监控失败: {}", err), true);
+        }
     });
 
-    let switch_monitor = Callback::new(move |(id, paused): (String, bool)| {
-        runner.run(
-            move |api| async move { api.switch_monitor(id, paused).await },
-            |new_state| {
-                if new_state {
-                    "监控已暂停"
-                } else {
-                    "监控已恢复"
-                }
-                .to_string()
-            },
-            "切换状态失败",
-        );
+    // 2. Delete Project
+    let delete_project = Mutation::new(move |id: String| {
+        let api = auth_state.get().api;
+        async move {
+            let api = api.ok_or("未连接到服务器".to_string())?;
+            // Return (id, result) to use ID in success callback
+            api.delete_project(id.clone()).await.map(|res| (id, res))
+        }
     });
 
-    let trigger_check = Callback::new(move |id: String| {
-        runner.run(
-            |api| async move { api.trigger_check(id).await },
-            |_| "检查已触发".to_string(),
-            "触发失败",
-        );
+    Effect::new(move |_| {
+        if let MutationState::Success((id, deleted)) = delete_project.state.get() {
+            if deleted {
+                notify("监控已删除".to_string(), false);
+                resource.update(|list| {
+                    if let Some(pos) = list.iter().position(|p| &p.unique_key == &id) {
+                        list.remove(pos);
+                    }
+                });
+            } else {
+                notify("监控不存在 (已清理)".to_string(), false);
+                resource.refetch();
+            }
+        } else if let MutationState::Error(err) = delete_project.state.get() {
+            notify(format!("删除监控失败: {}", err), true);
+        }
     });
 
-    // --- Timer & Auto Refresh Logic ---
+    // 3. Switch Monitor
+    let switch_monitor = Mutation::new(move |(id, paused): (String, bool)| {
+        let api = auth_state.get().api;
+        async move {
+            let api = api.ok_or("未连接到服务器".to_string())?;
+            api.switch_monitor(id, paused)
+                .await
+                .map(|res| (paused, res))
+        }
+    });
+
+    Effect::new(move |_| {
+        if let MutationState::Success((paused, _)) = switch_monitor.state.get() {
+            let msg = if paused {
+                "监控已暂停"
+            } else {
+                "监控已恢复"
+            };
+            notify(msg.to_string(), false);
+            resource.refetch();
+        } else if let MutationState::Error(err) = switch_monitor.state.get() {
+            notify(format!("切换状态失败: {}", err), true);
+        }
+    });
+
+    // 4. Trigger Check
+    let trigger_check = Mutation::new(move |id: String| {
+        let api = auth_state.get().api;
+        async move {
+            let api = api.ok_or("未连接到服务器".to_string())?;
+            api.trigger_check(id).await
+        }
+    });
+
+    Effect::new(move |_| {
+        if let MutationState::Success(_) = trigger_check.state.get() {
+            notify("检查已触发".to_string(), false);
+            resource.refetch();
+        } else if let MutationState::Error(err) = trigger_check.state.get() {
+            notify(format!("触发失败: {}", err), true);
+        }
+    });
+
+    // --- Auto Helpers ---
     Effect::new(move |_| {
         if !auth_state.get().is_authenticated {
             return;
@@ -166,17 +171,26 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
         // Auto refresh check
         Effect::new(move |_| {
             let _ = tick.get();
-            let list = projects.get();
-            let now = Date::now_timestamp();
+            let state = resource.state.get();
 
-            // Allow refresh if any project is expired
-            let needs_refresh = list.iter().any(|p| {
-                matches!(&p.state, MonitorState::Running { next_check_at } if *next_check_at <= now)
-            });
+            // 注意：我们只在 Resource 加载成功且非 loading 时检查
+            if matches!(state, ResourceState::Loading | ResourceState::Reloading(_)) {
+                return;
+            }
 
-            // Prevent concurrent refreshes
-            if needs_refresh && !loading.get_untracked() {
-                load_projects.call(());
+            if let Some(list) = resource.get_data() {
+                let now = Date::now_timestamp();
+
+                // Allow refresh if any project is expired
+                let needs_refresh = list.iter().any(|p| {
+                    matches!(&p.state, MonitorState::Running { next_check_at } if next_check_at <= &now)
+                });
+
+                // Prevent concurrent refreshes is handled by Resource internal state mostly,
+                // but explicit check helps avoiding spam
+                if needs_refresh {
+                    resource.refetch();
+                }
             }
         });
 
@@ -190,20 +204,11 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
         });
     });
 
-    // Initial Load when authenticated
-    Effect::new(move |_| {
-        let state = auth_state.get();
-        if state.is_authenticated && !state.is_loading {
-            load_projects.call(());
-        }
-    });
-
     let store = DashboardStore {
-        projects,
-        loading,
+        resource,
         tick,
         notification,
-        refresh: load_projects,
+        refresh,
         add_project,
         delete_project,
         switch_monitor,
@@ -276,7 +281,7 @@ fn DashboardNavbar(
         ]
         .class("flex-1 gap-2"),
         div![
-            AddProjectDialog().on_add(Callback::new(move |req| store.add_project.call(req))),
+            AddProjectDialog().on_add(Callback::new(move |req| store.add_project.mutate(req))),
             button((LogOut().style("height: 16px; width: 16px;"), " 断开连接"))
                 .on(event::click, move |e| on_logout.call(e))
                 .class("btn btn-outline btn-error gap-2")
@@ -289,7 +294,13 @@ fn DashboardNavbar(
 #[component]
 fn DashboardStats() -> impl View {
     let store = use_dashboard_store();
-    let total_monitors = move || store.projects.with(|p| p.len());
+    let total_monitors = move || {
+        store
+            .resource
+            .get_data()
+            .map(|v| v.len())
+            .unwrap_or_default()
+    };
 
     div![
         div![
@@ -338,7 +349,14 @@ fn DashboardStats() -> impl View {
 #[component]
 fn ProjectsTable() -> impl View {
     let store = use_dashboard_store();
-    let total_monitors = move || store.projects.with(|p| p.len());
+    let project_list = move || store.resource.get_data().unwrap_or_default();
+    let total_monitors = move || project_list().len();
+    let is_loading = Memo::new(move |_| {
+        matches!(
+            store.resource.state.get(),
+            ResourceState::Loading | ResourceState::Reloading(_)
+        )
+    });
 
     div(div![
         div![
@@ -351,7 +369,7 @@ fn ProjectsTable() -> impl View {
                 ))
                 .class("text-base-content/70 text-sm")
             ],
-            button(RefreshCw().style(store.loading.map(|l| {
+            button(RefreshCw().style(is_loading.map(|l| {
                 if l {
                     "height: 20px; width: 20px; animation: spin 1s linear infinite;"
                 } else {
@@ -359,7 +377,7 @@ fn ProjectsTable() -> impl View {
                 }
             })))
             .on(event::click, move |_| store.refresh.call(()))
-            .disabled(store.loading)
+            .disabled(is_loading)
             .class("btn btn-ghost btn-circle")
         ]
         .class("flex items-center justify-between p-6 pb-2 flex-none"),
@@ -375,14 +393,14 @@ fn ProjectsTable() -> impl View {
             tbody((
                 // 空状态
                 Show::new(
-                    move || total_monitors() == 0 && !store.loading.get(),
+                    move || total_monitors() == 0 && !is_loading.get(),
                     || tr(td("未配置监控。添加一个以开始。")
                         .attr("colspan", "5")
                         .class("text-center py-8 text-base-content/50"))
                 ),
                 // 加载状态
                 Show::new(
-                    move || store.loading.get() && total_monitors() == 0,
+                    move || is_loading.get() && total_monitors() == 0,
                     || tr(td((
                         span(()).class("loading loading-spinner loading-md"),
                         " 加载中..."
@@ -392,7 +410,7 @@ fn ProjectsTable() -> impl View {
                 ),
                 // 项目列表
                 For::new(
-                    store.projects,
+                    project_list,
                     |p| {
                         match &p.state {
                             MonitorState::Paused => format!("{}|paused", p.unique_key),
@@ -538,14 +556,14 @@ fn ProjectRow(project: ProjectConfig) -> impl View {
                 ))
                 .on(event::click, move |_| store
                     .switch_monitor
-                    .call((id_pause.clone(), !is_paused)))),
+                    .mutate((id_pause.clone(), !is_paused)))),
                 li(a((
                     RefreshCw().style("height: 16px; width: 16px; margin-right: 8px;"),
                     "立即触发检查"
                 ))
                 .on(event::click, move |_| store
                     .trigger_check
-                    .call(id_check.clone()))),
+                    .mutate(id_check.clone()))),
                 li(a((
                     Trash2().style("height: 16px; width: 16px; margin-right: 8px;"),
                     "删除"
@@ -553,7 +571,7 @@ fn ProjectRow(project: ProjectConfig) -> impl View {
                 .class("text-error hover:bg-error/10")
                 .on(event::click, move |_| store
                     .delete_project
-                    .call(id_del.clone())))
+                    .mutate(id_del.clone())))
             ]
             .attr("tabindex", "0")
             .class("dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52")

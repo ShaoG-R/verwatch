@@ -10,7 +10,7 @@ use silex::prelude::*;
 const STORAGE_URL_KEY: &str = "verwatch_url";
 
 /// 认证状态
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub struct AuthState {
     /// API 客户端实例（仅在认证成功后存在）
     pub api: Option<VerWatchApi>,

@@ -761,9 +761,9 @@ dependencies = [
 
 [[package]]
 name = "silex"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34d7ef57c80f52b3c2d0bdc10151c30b5f20d04c73b2795c26803bc5e6766c33"
+checksum = "0fe03c536b6c2f2fe261127f4d1b054d96fe0f05051e5cbf373f1bfd581d8ea7"
 dependencies = [
  "js-sys",
  "silex_core",
@@ -777,9 +777,9 @@ dependencies = [
 
 [[package]]
 name = "silex_core"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c2ffb553ba2f733c0587a26d482041256b414f914c935858033c536926548b8"
+checksum = "46a27d5e77a6130cfabde1ff2401be6bf363ff7dacf33ad6ce6c9892eec835a5"
 dependencies = [
  "silex_reactivity",
  "wasm-bindgen",
@@ -789,9 +789,9 @@ dependencies = [
 
 [[package]]
 name = "silex_dom"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cfbdc87afae2fa84c7369db05d64bfb91924fc647767e9f797ca1971455d889"
+checksum = "acc0c0dbfd67ad9a65be8fb89b98c1d232698bb50b97077f30f0ffce3ce91cac"
 dependencies = [
  "js-sys",
  "silex_core",
@@ -801,18 +801,18 @@ dependencies = [
 
 [[package]]
 name = "silex_html"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc9b935fb7f3df8aa51a6f7a99a3ae8d964cd92a2d3ba1af452df7baa8405577"
+checksum = "79195ce8d6ee514851bc5b49afdc7b8e21ebcff7ee59227acacdc0f5141adc1f"
 dependencies = [
  "silex_dom",
 ]
 
 [[package]]
 name = "silex_macros"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8136ce080848410c3fee6f2c0510ddc02c58ba651c749418fc8d939afd23b498"
+checksum = "1f768dac17d4cb7c1f839aa66de492f514f9c334d72fc2f257472325196abc62"
 dependencies = [
  "lightningcss",
  "proc-macro2",
@@ -822,9 +822,9 @@ dependencies = [
 
 [[package]]
 name = "silex_reactivity"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6a2e9ff7aaabb99559781400d4f141a32f031126846930164c4db90f04cbb9f"
+checksum = "f065ebb0eede97c765d787fc68e8ce92bc86117157388059e020d0ae56309b7b"
 dependencies = [
  "slotmap",
 ]
