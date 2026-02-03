@@ -92,10 +92,10 @@ pub fn BasicInfoForm(state: FormState) -> impl View {
             select((
                 option("发布时间 (推荐)")
                     .value("published_at")
-                    .selected(state.comp_mode.map(|m| m == ComparisonMode::PublishedAt)),
+                    .selected(state.comp_mode.map(|m| *m == ComparisonMode::PublishedAt)),
                 option("更新时间")
                     .value("updated_at")
-                    .selected(state.comp_mode.map(|m| m == ComparisonMode::UpdatedAt)),
+                    .selected(state.comp_mode.map(|m| *m == ComparisonMode::UpdatedAt)),
             ))
             .class("select select-bordered w-full")
             .on(event::change, move |ev| {

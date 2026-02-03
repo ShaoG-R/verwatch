@@ -15,11 +15,12 @@ extern "C" {
 
 // --- Logic Layer: Dashboard Store ---
 
-#[derive(Clone)]
-pub struct DashboardStore {
+#[derive(Store, Clone)]
+#[store(name = "use_dashboard_store")]
+pub struct Dashboard {
     pub resource: Resource<Vec<ProjectConfig>, String>,
-    pub tick: ReadSignal<u64>,
-    pub notification: ReadSignal<Option<(String, bool)>>,
+    pub tick: u64,
+    pub notification: Option<(String, bool)>,
     // Actions
     pub refresh: Callback<()>,
     pub add_project: Mutation<CreateProjectRequest, ProjectConfig, String>,
@@ -28,21 +29,9 @@ pub struct DashboardStore {
     pub trigger_check: Mutation<String, (), String>,
 }
 
-pub fn use_dashboard_store() -> DashboardStore {
-    expect_context::<DashboardStore>()
-}
-
 pub fn use_provide_dashboard_store() -> DashboardStore {
-    let (notification, set_notification) = signal(Option::<(String, bool)>::None);
-    let (tick, set_tick) = signal(0u64);
-
     let auth = use_auth();
     let auth_state = auth.state;
-
-    // Helper for notifications
-    let notify = move |msg: String, is_err: bool| {
-        set_notification.set(Some((msg, is_err)));
-    };
 
     // --- Resource Implementation ---
     let resource: Resource<Vec<ProjectConfig>, String> = Resource::new(
@@ -55,13 +44,6 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
             }
         },
     );
-
-    // Error handling for resource
-    Effect::new(move |_| {
-        if let ResourceState::Error(err) = resource.state.get() {
-            notify(format!("加载项目失败: {}", err), true);
-        }
-    });
 
     let refresh = Callback::new(move |_| resource.refetch());
 
@@ -76,16 +58,6 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
         }
     });
 
-    Effect::new(move |_| {
-        if let MutationState::Success(new_project) = add_project.state.get() {
-            notify("监控添加成功".to_string(), false);
-            // Optimization: Local update
-            resource.update(|list| list.push(new_project.clone()));
-        } else if let MutationState::Error(err) = add_project.state.get() {
-            notify(format!("添加监控失败: {}", err), true);
-        }
-    });
-
     // 2. Delete Project
     let delete_project = Mutation::new(move |id: String| {
         let api = auth_state.get().api;
@@ -93,24 +65,6 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
             let api = api.ok_or("未连接到服务器".to_string())?;
             // Return (id, result) to use ID in success callback
             api.delete_project(id.clone()).await.map(|res| (id, res))
-        }
-    });
-
-    Effect::new(move |_| {
-        if let MutationState::Success((id, deleted)) = delete_project.state.get() {
-            if deleted {
-                notify("监控已删除".to_string(), false);
-                resource.update(|list| {
-                    if let Some(pos) = list.iter().position(|p| &p.unique_key == &id) {
-                        list.remove(pos);
-                    }
-                });
-            } else {
-                notify("监控不存在 (已清理)".to_string(), false);
-                resource.refetch();
-            }
-        } else if let MutationState::Error(err) = delete_project.state.get() {
-            notify(format!("删除监控失败: {}", err), true);
         }
     });
 
@@ -125,20 +79,6 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
         }
     });
 
-    Effect::new(move |_| {
-        if let MutationState::Success((paused, _)) = switch_monitor.state.get() {
-            let msg = if paused {
-                "监控已暂停"
-            } else {
-                "监控已恢复"
-            };
-            notify(msg.to_string(), false);
-            resource.refetch();
-        } else if let MutationState::Error(err) = switch_monitor.state.get() {
-            notify(format!("切换状态失败: {}", err), true);
-        }
-    });
-
     // 4. Trigger Check
     let trigger_check = Mutation::new(move |id: String| {
         let api = auth_state.get().api;
@@ -148,66 +88,10 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
         }
     });
 
-    Effect::new(move |_| {
-        if let MutationState::Success(_) = trigger_check.state.get() {
-            notify("检查已触发".to_string(), false);
-            resource.refetch();
-        } else if let MutationState::Error(err) = trigger_check.state.get() {
-            notify(format!("触发失败: {}", err), true);
-        }
-    });
-
-    // --- Auto Helpers ---
-    Effect::new(move |_| {
-        if !auth_state.get().is_authenticated {
-            return;
-        }
-
-        // Start 1s Tick using auto-cleanup use_interval
-        let _ = use_interval(std::time::Duration::from_secs(1), move || {
-            set_tick.update(|t| *t = t.wrapping_add(1));
-        });
-
-        // Auto refresh check
-        Effect::new(move |_| {
-            let _ = tick.get();
-            let state = resource.state.get();
-
-            // 注意：我们只在 Resource 加载成功且非 loading 时检查
-            if matches!(state, ResourceState::Loading | ResourceState::Reloading(_)) {
-                return;
-            }
-
-            if let Some(list) = resource.get_data() {
-                let now = Date::now_timestamp();
-
-                // Allow refresh if any project is expired
-                let needs_refresh = list.iter().any(|p| {
-                    matches!(&p.state, MonitorState::Running { next_check_at } if next_check_at <= &now)
-                });
-
-                // Prevent concurrent refreshes is handled by Resource internal state mostly,
-                // but explicit check helps avoiding spam
-                if needs_refresh {
-                    resource.refetch();
-                }
-            }
-        });
-
-        // Auto-clear notification
-        Effect::new(move |_| {
-            if notification.get().is_some() {
-                let _ = use_timeout(std::time::Duration::from_secs(3), move || {
-                    set_notification.set(None)
-                });
-            }
-        });
-    });
-
-    let store = DashboardStore {
+    let dashboard_source = Dashboard {
         resource,
-        tick,
-        notification,
+        tick: 0,
+        notification: None,
         refresh,
         add_project,
         delete_project,
@@ -215,7 +99,135 @@ pub fn use_provide_dashboard_store() -> DashboardStore {
         trigger_check,
     };
 
-    provide_context(store.clone());
+    let store = DashboardStore::new(dashboard_source);
+
+    // Helper for notifications (updates store)
+    let notify = move |msg: String, is_err: bool| {
+        store.notification.set(Some((msg, is_err)));
+    };
+
+    // Error handling for resource
+    Effect::new(clone!(notify, resource => move |_| {
+        resource.state.with(|s| {
+            if let ResourceState::Error(err) = s {
+                notify(format!("加载项目失败: {}", err), true);
+            }
+        });
+    }));
+
+    // Effects for Mutations (using local handles for state check, store for updates where applicable)
+
+    // Add Project Effect
+    Effect::new(clone!(notify, add_project, resource => move |_| {
+        add_project.state.with(|s| {
+            if let MutationState::Success(new_project) = s {
+                notify("监控添加成功".to_string(), false);
+                // Optimization: Local update
+                resource.update(|list| list.push(new_project.clone()));
+            } else if let MutationState::Error(err) = s {
+                notify(format!("添加监控失败: {}", err), true);
+            }
+        });
+    }));
+
+    // Delete Project Effect
+    Effect::new(clone!(notify, delete_project, resource => move |_| {
+        delete_project.state.with(|s| {
+            if let MutationState::Success((id, deleted)) = s {
+                if *deleted {
+                    notify("监控已删除".to_string(), false);
+                    resource.update(|list| {
+                        if let Some(pos) = list.iter().position(|p| &p.unique_key == id) {
+                            list.remove(pos);
+                        }
+                    });
+                } else {
+                    notify("监控不存在 (已清理)".to_string(), false);
+                    resource.refetch();
+                }
+            } else if let MutationState::Error(err) = s {
+                notify(format!("删除监控失败: {}", err), true);
+            }
+        });
+    }));
+
+    // Switch Monitor Effect
+    Effect::new(clone!(notify, switch_monitor, resource => move |_| {
+        switch_monitor.state.with(|s| {
+            if let MutationState::Success((paused, _)) = s {
+                let msg = if *paused {
+                    "监控已暂停"
+                } else {
+                    "监控已恢复"
+                };
+                notify(msg.to_string(), false);
+                resource.refetch();
+            } else if let MutationState::Error(err) = s {
+                notify(format!("切换状态失败: {}", err), true);
+            }
+        });
+    }));
+
+    // Trigger Check Effect
+    Effect::new(clone!(notify, trigger_check, resource => move |_| {
+        trigger_check.state.with(|s| {
+            if let MutationState::Success(_) = s {
+                notify("检查已触发".to_string(), false);
+                resource.refetch();
+            } else if let MutationState::Error(err) = s {
+                notify(format!("触发失败: {}", err), true);
+            }
+        });
+    }));
+
+    // --- Auto Helpers ---
+    Effect::new(clone!(auth_state, store, resource => move |_| {
+        if !auth_state.get().is_authenticated {
+            return;
+        }
+
+        // Start 1s Tick using auto-cleanup use_interval
+        let _ = use_interval(std::time::Duration::from_secs(1), clone!(store => move || {
+            store.tick.update(|t| *t = t.wrapping_add(1));
+        }));
+
+        // Auto refresh check
+        Effect::new(clone!(store, resource => move |_| {
+            let _ = store.tick.get();
+            // Note: use local resource handle to avoid extra .get()
+            // Check state without cloning the entire project list
+            let should_refetch = resource.state.with(|state| {
+                if matches!(state, ResourceState::Loading | ResourceState::Reloading(_)) {
+                    return false;
+                }
+
+                if let ResourceState::Ready(list) | ResourceState::Reloading(list) = state {
+                    let now = Date::now_timestamp();
+                    // Allow refresh if any project is expired
+                    list.iter().any(|p| {
+                        matches!(&p.state, MonitorState::Running { next_check_at } if next_check_at <= &now)
+                    })
+                } else {
+                    false
+                }
+            });
+
+            if should_refetch {
+                resource.refetch();
+            }
+        }));
+
+        // Auto-clear notification
+        Effect::new(clone!(store => move |_| {
+            if store.notification.get().is_some() {
+                let _ = use_timeout(std::time::Duration::from_secs(3), move || {
+                    store.notification.set(None)
+                });
+            }
+        }));
+    }));
+
+    provide_context(store);
     store
 }
 
@@ -248,7 +260,7 @@ pub fn DashboardPage() -> impl View {
 }
 
 #[component]
-fn NotificationToast(notification: ReadSignal<Option<(String, bool)>>) -> impl View {
+fn NotificationToast(notification: Signal<Option<(String, bool)>>) -> impl View {
     Show::new(notification.map(|n| n.is_some()), move || {
         div(
             div(span(notification.map(|n| n.clone().unwrap().0))).class(notification.map(|n| {
@@ -281,7 +293,10 @@ fn DashboardNavbar(
         ]
         .class("flex-1 gap-2"),
         div![
-            AddProjectDialog().on_add(Callback::new(move |req| store.add_project.mutate(req))),
+            AddProjectDialog().on_add(Callback::new(move |req| store
+                .add_project
+                .get()
+                .mutate(req))),
             button((LogOut().style("height: 16px; width: 16px;"), " 断开连接"))
                 .on(event::click, move |e| on_logout.call(e))
                 .class("btn btn-outline btn-error gap-2")
@@ -295,11 +310,10 @@ fn DashboardNavbar(
 fn DashboardStats() -> impl View {
     let store = use_dashboard_store();
     let total_monitors = move || {
-        store
-            .resource
-            .get_data()
-            .map(|v| v.len())
-            .unwrap_or_default()
+        store.resource.get().state.with(|s| match s {
+            ResourceState::Ready(v) | ResourceState::Reloading(v) => v.len(),
+            _ => 0,
+        })
     };
 
     div![
@@ -349,13 +363,19 @@ fn DashboardStats() -> impl View {
 #[component]
 fn ProjectsTable() -> impl View {
     let store = use_dashboard_store();
-    let project_list = move || store.resource.get_data().unwrap_or_default();
-    let total_monitors = move || project_list().len();
+    let project_list = move || store.resource.get().get_data().unwrap_or_default();
+    let total_monitors = move || {
+        store.resource.get().state.with(|s| match s {
+            ResourceState::Ready(v) | ResourceState::Reloading(v) => v.len(),
+            _ => 0,
+        })
+    };
     let is_loading = Memo::new(move |_| {
-        matches!(
-            store.resource.state.get(),
-            ResourceState::Loading | ResourceState::Reloading(_)
-        )
+        store
+            .resource
+            .get()
+            .state
+            .with(|s| matches!(s, ResourceState::Loading | ResourceState::Reloading(_)))
     });
 
     div(div![
@@ -370,13 +390,13 @@ fn ProjectsTable() -> impl View {
                 .class("text-base-content/70 text-sm")
             ],
             button(RefreshCw().style(is_loading.map(|l| {
-                if l {
+                if *l {
                     "height: 20px; width: 20px; animation: spin 1s linear infinite;"
                 } else {
                     "height: 20px; width: 20px;"
                 }
             })))
-            .on(event::click, move |_| store.refresh.call(()))
+            .on(event::click, move |_| store.refresh.get().call(()))
             .disabled(is_loading)
             .class("btn btn-ghost btn-circle")
         ]
@@ -467,14 +487,13 @@ fn ProjectRow(project: ProjectConfig) -> impl View {
     let store = use_dashboard_store();
     let id = project.unique_key.clone();
     let is_paused = project.state.is_paused();
-    let state_for_countdown = project.state.clone();
-    let state_for_badge = project.state.clone();
+    let state = project.state.clone();
     let display = ProjectRowDisplay::from(&project);
 
     // Countdown Text - 调用 JS 格式化函数
-    let countdown_text = move || {
+    let countdown_text = clone!(store, state => move || {
         let _ = store.tick.get(); // Subscribe to tick
-        match &state_for_countdown {
+        match &state {
             MonitorState::Paused => "--".to_string(),
             MonitorState::Running { next_check_at } => {
                 let now = Date::now_timestamp();
@@ -482,9 +501,7 @@ fn ProjectRow(project: ProjectConfig) -> impl View {
                 format_countdown(secs)
             }
         }
-    };
-
-    let (id_pause, id_check, id_del) = (id.clone(), id.clone(), id.clone());
+    });
 
     tr![
         td(div![
@@ -510,10 +527,10 @@ fn ProjectRow(project: ProjectConfig) -> impl View {
             Clock().style("height: 12px; width: 12px; margin-right: 4px;"),
             countdown_text
         ]
-        .class(move || {
+        .class(clone!(store, state => move || {
             let _ = store.tick.get();
             let base = "badge badge-sm font-mono";
-            match &state_for_badge {
+            match &state {
                 MonitorState::Paused => format!("{} badge-ghost", base),
                 MonitorState::Running { next_check_at } => {
                     let now = Date::now_timestamp();
@@ -527,7 +544,7 @@ fn ProjectRow(project: ProjectConfig) -> impl View {
                     }
                 }
             }
-        }))
+        })))
         .class("hidden md:table-cell"),
         td(display.secret).class("hidden lg:table-cell font-mono text-xs opacity-50"),
         td(div![
@@ -554,24 +571,36 @@ fn ProjectRow(project: ProjectConfig) -> impl View {
                         }
                     }
                 ))
-                .on(event::click, move |_| store
+                .on(
+                    event::click,
+                    clone!(store, @id => move |_| store
                     .switch_monitor
-                    .mutate((id_pause.clone(), !is_paused)))),
+                    .get()
+                    .mutate((id, !is_paused)))
+                )),
                 li(a((
                     RefreshCw().style("height: 16px; width: 16px; margin-right: 8px;"),
                     "立即触发检查"
                 ))
-                .on(event::click, move |_| store
+                .on(
+                    event::click,
+                    clone!(store, @id => move |_| store
                     .trigger_check
-                    .mutate(id_check.clone()))),
+                    .get()
+                    .mutate(id))
+                )),
                 li(a((
                     Trash2().style("height: 16px; width: 16px; margin-right: 8px;"),
                     "删除"
                 ))
                 .class("text-error hover:bg-error/10")
-                .on(event::click, move |_| store
+                .on(
+                    event::click,
+                    clone!(store, @id => move |_| store
                     .delete_project
-                    .mutate(id_del.clone())))
+                    .get()
+                    .mutate(id))
+                ))
             ]
             .attr("tabindex", "0")
             .class("dropdown-content z-[1] menu p-2 shadow bg-base-200 rounded-box w-52")
